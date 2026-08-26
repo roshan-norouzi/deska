@@ -11,6 +11,7 @@ RUN pnpm install --frozen-lockfile || pnpm install
 FROM deps AS builder
 COPY packages ./packages
 COPY apps/web ./apps/web
+RUN mkdir -p /app/apps/web/public
 ARG API_URL=http://localhost:3001
 ENV API_URL=$API_URL
 ARG NEXT_PUBLIC_APP_VERSION=1.0.0
