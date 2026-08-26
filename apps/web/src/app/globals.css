@@ -9,6 +9,7 @@
 
   body {
     @apply bg-slate-50 text-slate-900 antialiased;
+    overflow-x: hidden;
     font-feature-settings: 'ss01' on;
     font-variant-numeric: proportional-nums;
   }

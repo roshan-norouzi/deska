@@ -121,6 +121,7 @@ model NewsFeed {
   tenantId String
   name String
   url String
+  purpose String @default("news-room")
   enabled Boolean @default(true)
   lastFetchedAt DateTime?
   lastError String @default("")
@@ -146,6 +147,11 @@ model NewsArticle {
   status String @default("new")
   sourceName String @default("")
   publishedAtSource DateTime?
+  rejectedAt DateTime?
+  purgeAfter DateTime?
+  processingStartedAt DateTime?
+  publishedAt DateTime?
+  wordpressPostId String @default("")
   wordpressPostUrl String @default("")
   lastError String @default("")
   createdAt DateTime @default(now())
@@ -153,6 +159,7 @@ model NewsArticle {
   feed NewsFeed? @relation(fields:[feedId],references:[id],onDelete:SetNull)
   @@unique([tenantId,canonicalUrl])
   @@index([tenantId,status])
+  @@index([status,purgeAfter])
 }
 model SocialFeed {
   id String @id @default(cuid())

@@ -7,23 +7,20 @@ echo ========================================
 echo   DESKA ERP
 echo ========================================
 echo.
-echo Starting PostgreSQL + API + Web in Docker Desktop...
+echo Starting PostgreSQL + API + Web in development mode (Hot Reload)...
 echo.
 
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-docker.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0scripts\start-dev.ps1" -SkipSeed -FreshWebCache
 set EXITCODE=%ERRORLEVEL%
 
 echo.
-if %EXITCODE% neq 0 (
-    echo Startup failed. Common fixes:
-    echo   1. Start Docker Desktop and wait until it is ready
-    echo   2. Close other apps using ports 3000 / 3001 / 5433
-    echo   3. Run Run.bat again
+if not "%EXITCODE%"=="0" (
+    echo Startup failed. Check the message above.
     echo.
     pause
     exit /b %EXITCODE%
 )
 
 echo DESKA ERP is running at http://localhost:3000/login
-pause
+start "" "http://localhost:3000/login"
 exit /b 0

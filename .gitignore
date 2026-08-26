@@ -4,6 +4,7 @@ dist/
 .env
 .env.local
 *.log
+.deska-dev-processes.json
 .DS_Store
 coverage/
 .turbo/

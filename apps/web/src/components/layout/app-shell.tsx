@@ -102,7 +102,9 @@ export function AppShell({ children, title }: AppShellProps) {
 
         <nav className="flex-1 overflow-y-auto px-3 py-4">
           {navGroups.map((group) => {
-            const isExpanded = expandedGroups[group.id] ?? (group.id === 'dashboard' || group.id === 'core');
+            const isExpanded = expandedGroups[group.id] ?? (
+              group.id === 'dashboard' || group.id === 'core' || group.id === 'publishing'
+            );
             const hasActiveItem = group.items.some((item) => pathname === item.href || pathname.startsWith(`${item.href}/`));
 
             if (group.items.length === 1 && group.id === 'dashboard') {
