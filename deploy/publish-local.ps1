@@ -24,11 +24,15 @@ if (-not $SkipSystemExport -and (Get-Command docker -ErrorAction SilentlyContinu
   Write-Host 'Exporting local system observances...' -ForegroundColor Cyan
   $prismaPath = Join-Path $projectRoot 'apps/api/prisma'
   try {
-    docker compose build api | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'API image build failed.' }
-    docker compose up -d api | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to start local API.' }
     $exported = @(docker compose exec -T api node prisma/export-system-observances.cjs 2>$null)
+    if ($LASTEXITCODE -ne 0) {
+      Write-Host 'Local API image lacks the exporter; rebuilding it once...' -ForegroundColor Yellow
+      docker compose build api | Out-Host
+      if ($LASTEXITCODE -ne 0) { throw 'API image build failed.' }
+      docker compose up -d api | Out-Host
+      if ($LASTEXITCODE -ne 0) { throw 'Unable to start local API.' }
+      $exported = @(docker compose exec -T api node prisma/export-system-observances.cjs 2>$null)
+    }
     if ($LASTEXITCODE -ne 0) { throw 'Unable to export system observances.' }
     $json = ($exported -join [Environment]::NewLine).Trim()
     if (-not $json.StartsWith('[')) { throw 'Export did not return valid JSON.' }
@@ -89,15 +93,22 @@ if ($AutoDispatch) {
     Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body (@{ ref = $branch } | ConvertTo-Json) | Out-Null
     Write-Host 'GitHub Actions deployment started. Waiting for result...' -ForegroundColor Cyan
     $run = $null
-    for ($attempt = 1; $attempt -le 30 -and -not $run; $attempt++) {
+    $latestRun = $null
+    for ($attempt = 1; $attempt -le 60 -and -not $run; $attempt++) {
       Start-Sleep -Seconds 5
       $runsUri = "https://api.github.com/repos/$owner/$repository/actions/workflows/deploy.yml/runs?branch=$branch&event=workflow_dispatch&per_page=10"
       $runs = Invoke-RestMethod -Method Get -Uri $runsUri -Headers $headers
-      $run = @($runs.workflow_runs | Where-Object { ([DateTime]$_.created_at).ToUniversalTime() -ge $dispatchStarted } | Select-Object -First 1)
-      if ($run -and $run.status -ne 'completed') { $run = $null }
-      if (-not $run) { Write-Host "Waiting... ($attempt/30)" }
+      $latestRun = @($runs.workflow_runs | Where-Object { ([DateTime]$_.created_at).ToUniversalTime() -ge $dispatchStarted } | Select-Object -First 1)
+      if ($latestRun -and $latestRun[0].status -eq 'completed') { $run = $latestRun }
+      if (-not $run) { Write-Host "Waiting... ($attempt/60)" }
     }
-    if (-not $run) { throw 'Workflow did not finish within the waiting period. Check GitHub Actions.' }
+    if (-not $run) {
+      if ($latestRun) {
+        Write-Host "Workflow is still running: $($latestRun[0].html_url)" -ForegroundColor Yellow
+        return
+      }
+      throw 'Workflow did not start or could not be found. Check GitHub Actions.'
+    }
     if ($run.conclusion -ne 'success') {
       $jobsUri = "https://api.github.com/repos/$owner/$repository/actions/runs/$($run.id)/jobs"
       $jobs = Invoke-RestMethod -Method Get -Uri $jobsUri -Headers $headers
