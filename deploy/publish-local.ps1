@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
   [string]$Message = '',
-  [switch]$NoVersionBump
+  [switch]$NoVersionBump,
+  [switch]$AutoDispatch
 )
 
 $ErrorActionPreference = 'Stop'
@@ -9,9 +10,13 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $projectRoot
 $configPath = Join-Path $PSScriptRoot 'config.local.json'
 $branch = 'main'
+$owner = 'roshan-norouzi'
+$repository = 'deska'
 if (Test-Path $configPath) {
   $config = Get-Content $configPath -Raw | ConvertFrom-Json
   if ($config.branch) { $branch = [string]$config.branch }
+  if ($config.githubOwner) { $owner = [string]$config.githubOwner }
+  if ($config.repository) { $repository = [string]$config.repository }
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -53,5 +58,20 @@ if ($status.Count -eq 0) {
   Write-Host 'Changes pushed to GitHub.' -ForegroundColor Green
 }
 
-Start-Process (Join-Path $PSScriptRoot 'index.html')
-Write-Host 'Deployment page opened. Enter the Token and start the update.' -ForegroundColor Green
+if ($AutoDispatch) {
+  $secureToken = Read-Host 'GitHub Actions Token (input is hidden)' -AsSecureString
+  $tokenPtr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secureToken)
+  try {
+    $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
+    $uri = "https://api.github.com/repos/$owner/$repository/actions/workflows/deploy.yml/dispatches"
+    $headers = @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+    Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body (@{ ref = $branch } | ConvertTo-Json) | Out-Null
+    Write-Host 'GitHub Actions deployment started.' -ForegroundColor Green
+  } finally {
+    if ($tokenPtr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr) }
+    $token = $null
+  }
+} else {
+  Start-Process (Join-Path $PSScriptRoot 'index.html')
+  Write-Host 'Deployment page opened. Enter the Token and start the update.' -ForegroundColor Green
+}

@@ -79,6 +79,7 @@ jobs:
           if grep -q '^IMAGE_PREFIX=' .env; then sed -i "s|^IMAGE_PREFIX=.*|IMAGE_PREFIX=$IMAGE_PREFIX|" .env; else printf '\nIMAGE_PREFIX=%s\n' "$IMAGE_PREFIX" >> .env; fi
           docker compose pull api web
           docker compose up -d --no-build --remove-orphans
+          docker compose run --rm api node prisma/seed.cjs
           printf '%s' "$VERSION" > .deska-installed-version
           docker image prune -f >/dev/null
           REMOTE

@@ -1,6 +1,7 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 const { APP_PERMISSIONS, MODULE_CATALOG } = require('@deska/shared');
+const systemObservances = require('./system-observances.json');
 
 const prisma = new PrismaClient();
 
@@ -47,6 +48,36 @@ async function main() {
     });
   }
   await prisma.department.upsert({ where: { id: 'hr-dept-default' }, create: { id: 'hr-dept-default', tenantId: tenant.id, name: 'منابع انسانی' }, update: { name: 'منابع انسانی' } });
+  for (const observance of systemObservances) {
+    await prisma.systemCalendarObservance.upsert({
+      where: { sourceKey: observance.sourceKey },
+      create: {
+        sourceKey: observance.sourceKey,
+        title: observance.title,
+        description: observance.description ?? null,
+        startAt: new Date(observance.startAt),
+        endAt: new Date(observance.endAt),
+        allDay: observance.allDay ?? true,
+        recurrenceType: observance.recurrenceType ?? 'yearly',
+        recurrenceRule: observance.recurrenceRule ?? undefined,
+        recurrenceCal: observance.recurrenceCal ?? 'jalali',
+        isHoliday: observance.isHoliday ?? false,
+        source: observance.source ?? 'deska-system',
+      },
+      update: {
+        title: observance.title,
+        description: observance.description ?? null,
+        startAt: new Date(observance.startAt),
+        endAt: new Date(observance.endAt),
+        allDay: observance.allDay ?? true,
+        recurrenceType: observance.recurrenceType ?? 'yearly',
+        recurrenceRule: observance.recurrenceRule ?? undefined,
+        recurrenceCal: observance.recurrenceCal ?? 'jalali',
+        isHoliday: observance.isHoliday ?? false,
+        source: observance.source ?? 'deska-system',
+      },
+    });
+  }
   console.log('DESKA seed completed');
 }
 
