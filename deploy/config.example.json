@@ -1,0 +1,8 @@
+{
+  "githubOwner": "roshan-norouzi",
+  "repository": "deska",
+  "branch": "main",
+  "serverHost": "pixad.ir",
+  "serverUser": "root",
+  "deployPath": "/www/wwwroot/pixad.ir/deska"
+}

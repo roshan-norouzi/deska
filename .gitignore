@@ -10,3 +10,4 @@ coverage/
 uploads/
 *.tsbuildinfo
 .data/
+deploy/config.local.json
