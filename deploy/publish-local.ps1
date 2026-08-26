@@ -2,7 +2,8 @@
 param(
   [string]$Message = '',
   [switch]$NoVersionBump,
-  [switch]$AutoDispatch
+  [switch]$AutoDispatch,
+  [switch]$SkipSystemExport
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,25 @@ if (Test-Path $configPath) {
   if ($config.branch) { $branch = [string]$config.branch }
   if ($config.githubOwner) { $owner = [string]$config.githubOwner }
   if ($config.repository) { $repository = [string]$config.repository }
+}
+
+if (-not $SkipSystemExport -and (Get-Command docker -ErrorAction SilentlyContinue)) {
+  Write-Host 'Exporting local system observances...' -ForegroundColor Cyan
+  $prismaPath = Join-Path $projectRoot 'apps/api/prisma'
+  try {
+    docker compose build api | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'API image build failed.' }
+    docker compose up -d api | Out-Host
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to start local API.' }
+    $exported = @(docker compose exec -T api node prisma/export-system-observances.cjs 2>$null)
+    if ($LASTEXITCODE -ne 0) { throw 'Unable to export system observances.' }
+    $json = ($exported -join [Environment]::NewLine).Trim()
+    if (-not $json.StartsWith('[')) { throw 'Export did not return valid JSON.' }
+    Set-Content -Path (Join-Path $prismaPath 'system-observances.json') -Value $json -Encoding utf8
+    Write-Host 'System observances exported.' -ForegroundColor Green
+  } catch {
+    throw "System observance export failed: $($_.Exception.Message)"
+  }
 }
 
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
@@ -72,6 +92,5 @@ if ($AutoDispatch) {
     $token = $null
   }
 } else {
-  Start-Process (Join-Path $PSScriptRoot 'index.html')
-  Write-Host 'Deployment page opened. Enter the Token and start the update.' -ForegroundColor Green
+  Write-Host 'Changes are ready. Run deploy.bat with -AutoDispatch to start the server deployment.' -ForegroundColor Green
 }
