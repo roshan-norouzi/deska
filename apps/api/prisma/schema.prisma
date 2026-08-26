@@ -1,0 +1,452 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ PLATFORM CORE ============
+
+model User {
+  id            String         @id @default(cuid())
+  email         String         @unique
+  passwordHash  String
+  name          String
+  role          String         @default("user")
+  avatarUrl     String?
+  isActive      Boolean        @default(true)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  refreshTokens RefreshToken[]
+  tenantMembers TenantMember[]
+  notifications Notification[]
+  auditLogs     AuditLog[]     @relation("AuditUser")
+  activities    Activity[]     @relation("ActivityUser")
+  employees     Employee[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  userId    String
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Tenant {
+  id          String             @id @default(cuid())
+  name        String
+  slug        String             @unique
+  plan        String             @default("starter")
+  settings    Json               @default("{}")
+  locale      String             @default("fa-IR")
+  isActive    Boolean            @default(true)
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+  members     TenantMember[]
+  modules     TenantModule[]
+  roles       RoleDefinition[]
+  invitations TenantInvitation[]
+}
+
+model TenantMember {
+  tenantId String
+  userId   String
+  role     String   @default("member")
+  joinedAt DateTime @default(now())
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, userId])
+  @@index([userId])
+}
+
+model TenantInvitation {
+  id        String   @id @default(cuid())
+  tenantId  String
+  email     String
+  role      String   @default("member")
+  token     String   @unique
+  expiresAt DateTime
+  accepted  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, email])
+}
+
+model ModuleDefinition {
+  id            String         @id
+  name          String
+  domain        String
+  version       String         @default("1.0.0")
+  dependencies  String[]
+  isCore        Boolean        @default(false)
+  description   String?
+  source        String         @default("builtin")
+  packagePath   String?
+  checksum      String?
+  manifest      Json?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  tenantModules TenantModule[]
+}
+
+model TenantModule {
+  tenantId String
+  moduleId String
+  enabled  Boolean          @default(false)
+  settings Json             @default("{}")
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  module   ModuleDefinition @relation(fields: [moduleId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, moduleId])
+}
+
+model RoleDefinition {
+  id          String           @id @default(cuid())
+  tenantId    String
+  name        String
+  description String?
+  isSystem    Boolean          @default(false)
+  createdAt   DateTime         @default(now())
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions RolePermission[]
+
+  @@unique([tenantId, name])
+}
+
+model RolePermission {
+  id         String         @id @default(cuid())
+  roleId     String
+  permission String
+  role       RoleDefinition @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([roleId, permission])
+}
+
+model CustomFieldDefinition {
+  id         String   @id @default(cuid())
+  tenantId   String
+  moduleId   String
+  entityType String
+  fieldName  String
+  fieldLabel String
+  fieldType  String
+  options    Json?
+  required   Boolean  @default(false)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  @@unique([tenantId, entityType, fieldName])
+  @@index([tenantId, entityType])
+}
+
+model CustomFieldValue {
+  id           String    @id @default(cuid())
+  tenantId     String
+  entityType   String
+  entityId     String
+  fieldName    String
+  valueText    String?
+  valueNumber  Decimal?  @db.Decimal(18, 4)
+  valueDate    DateTime?
+  valueBoolean Boolean?
+  valueJson    Json?
+
+  @@unique([tenantId, entityType, entityId, fieldName])
+  @@index([tenantId, entityType, entityId])
+}
+
+model NumberSequence {
+  id         String @id @default(cuid())
+  tenantId   String
+  code       String
+  prefix     String @default("")
+  suffix     String @default("")
+  nextNumber Int    @default(1)
+  padding    Int    @default(4)
+
+  @@unique([tenantId, code])
+}
+
+// ============ CONTACTS ============
+
+model Contact {
+  id                 String               @id @default(cuid())
+  tenantId           String
+  type               String               @default("person")
+  name               String
+  firstName          String?
+  lastName           String?
+  email              String?
+  phone              String?
+  mobile             String?
+  nationalId         String?
+  economicCode       String?
+  registrationNumber String?
+  companyName        String?
+  address            String?
+  city               String?
+  province           String?
+  postalCode         String?
+  website            String?
+  notes              String?
+  birthDate          DateTime?
+  marriageDate       DateTime?
+  membershipDate     DateTime?
+  isActive           Boolean              @default(true)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  bankAccounts       ContactBankAccount[]
+  employees          Employee[]
+
+  @@index([tenantId])
+  @@index([tenantId, type])
+}
+
+model ContactBankAccount {
+  id            String  @id @default(cuid())
+  tenantId      String
+  contactId     String
+  bankName      String
+  accountNumber String?
+  cardNumber    String?
+  sheba         String?
+  isDefault     Boolean @default(false)
+  contact       Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@index([contactId])
+}
+
+// ============ DOCUMENTS ============
+
+model DocumentFolder {
+  id        String           @id @default(cuid())
+  tenantId  String
+  name      String
+  parentId  String?
+  isSystem  Boolean          @default(false)
+  systemKey String?
+  createdAt DateTime         @default(now())
+  parent    DocumentFolder?  @relation("FolderTree", fields: [parentId], references: [id])
+  children  DocumentFolder[] @relation("FolderTree")
+  files     DocumentFile[]
+
+  @@unique([tenantId, systemKey])
+  @@index([tenantId])
+}
+
+model DocumentFile {
+  id           String          @id @default(cuid())
+  tenantId     String
+  folderId     String?
+  name         String
+  originalName String
+  mimeType     String
+  size         Int
+  path         String
+  entityType   String?
+  entityId     String?
+  version      Int             @default(1)
+  uploadedById String?
+  createdAt    DateTime        @default(now())
+  folder       DocumentFolder? @relation(fields: [folderId], references: [id])
+
+  @@index([tenantId])
+  @@index([tenantId, entityType, entityId])
+}
+
+// ============ CALENDAR ============
+
+model CalendarEvent {
+  id             String                  @id @default(cuid())
+  tenantId       String
+  title          String
+  description    String?
+  startAt        DateTime
+  endAt          DateTime
+  allDay         Boolean                 @default(false)
+  location       String?
+  recurrenceType String                  @default("none")
+  recurrenceRule Json?
+  recurrenceCal  String                  @default("jalali")
+  color          String?
+  entityType     String?
+  entityId       String?
+  createdById    String?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  attendees      CalendarEventAttendee[]
+
+  @@index([tenantId, startAt])
+}
+
+model SystemCalendarObservance {
+  id             String   @id @default(cuid())
+  sourceKey      String   @unique
+  title          String
+  description    String?
+  startAt        DateTime
+  endAt          DateTime
+  allDay         Boolean  @default(true)
+  recurrenceType String   @default("yearly")
+  recurrenceRule Json?
+  recurrenceCal  String   @default("jalali")
+  isHoliday      Boolean  @default(false)
+  source         String   @default("university-of-tehran-1405")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([startAt])
+}
+
+model CalendarEventAttendee {
+  id      String        @id @default(cuid())
+  eventId String
+  userId  String?
+  email   String?
+  name    String?
+  status  String        @default("pending")
+  event   CalendarEvent @relation(fields: [eventId], references: [id], onDelete: Cascade)
+
+  @@index([eventId])
+}
+
+// ============ AUDIT & ACTIVITY ============
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String?
+  action     String
+  entityType String
+  entityId   String
+  changes    Json?
+  ipAddress  String?
+  createdAt  DateTime @default(now())
+  user       User?    @relation("AuditUser", fields: [userId], references: [id])
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, createdAt])
+}
+
+model Activity {
+  id         String   @id @default(cuid())
+  tenantId   String
+  userId     String?
+  type       String
+  title      String
+  entityType String?
+  entityId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+  user       User?    @relation("ActivityUser", fields: [userId], references: [id])
+
+  @@index([tenantId, entityType, entityId])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  tenantId  String
+  userId    String
+  title     String
+  message   String
+  type      String   @default("info")
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+// ============ INVENTORY ============
+
+// ============ HR ============
+
+model Department {
+  id          String       @id @default(cuid())
+  tenantId    String
+  name        String
+  parentId    String?
+  managerId   String?
+  employees   Employee[]
+  jobOpenings JobOpening[]
+
+  @@index([tenantId])
+}
+
+model Employee {
+  id                     String      @id @default(cuid())
+  tenantId               String
+  userId                 String?
+  contactId              String?
+  employeeCode           String
+  departmentId           String?
+  jobTitle               String?
+  hireDate               DateTime?
+  status                 String      @default("active")
+  firstName              String?
+  lastName               String?
+  nationalId             String?
+  fatherName             String?
+  motherName             String?
+  birthCertificateNumber String?
+  birthCertificateDate   DateTime?   @db.Date
+  birthDate              DateTime?   @db.Date
+  maritalStatus          String?
+  address                String?
+  postalCode             String?
+  mobilePhone            String?
+  landlinePhone          String?
+  bankAccountNumber      String?
+  bankCardNumber         String?
+  iban                   String?
+  bankName               String?
+  insuranceNumber        String?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  department             Department? @relation(fields: [departmentId], references: [id])
+  user                   User?       @relation(fields: [userId], references: [id])
+  contact                Contact?    @relation(fields: [contactId], references: [id])
+
+  @@unique([tenantId, employeeCode])
+  @@unique([tenantId, userId])
+  @@unique([tenantId, nationalId])
+  @@index([tenantId, nationalId])
+  @@index([tenantId, mobilePhone])
+  @@index([tenantId, status])
+}
+
+model JobOpening {
+  id            String      @id @default(cuid())
+  tenantId      String
+  title         String
+  department    String?
+  departmentId  String?
+  description   String?
+  status        String      @default("open")
+  createdAt     DateTime    @default(now())
+  departmentRef Department? @relation(fields: [departmentId], references: [id])
+  applicants    Applicant[]
+
+  @@index([tenantId, status])
+}
+
+model Applicant {
+  id        String     @id @default(cuid())
+  openingId String
+  name      String
+  email     String?
+  phone     String?
+  resumeUrl String?
+  status    String     @default("new")
+  notes     String?
+  createdAt DateTime   @default(now())
+  opening   JobOpening @relation(fields: [openingId], references: [id], onDelete: Cascade)
+}

@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: deska
+          POSTGRES_PASSWORD: deska123
+          POSTGRES_DB: deska_erp_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @deska/shared build
+      - run: pnpm --filter @deska/module-sdk build
+
+      - name: Generate Prisma client
+        run: pnpm --filter @deska/api db:generate
+        env:
+          DATABASE_URL: postgresql://deska:deska123@localhost:5432/deska_erp_test
+
+      - run: pnpm typecheck
+      - run: pnpm --filter @deska/api build
+      - run: pnpm --filter @deska/web build

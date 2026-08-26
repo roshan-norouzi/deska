@@ -1,0 +1,84 @@
+name: Build and deploy DESKA
+
+on:
+  workflow_dispatch:
+
+env:
+  IMAGE_PREFIX: ghcr.io/roshan-norouzi/deska
+
+jobs:
+  publish-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read version
+        shell: bash
+        run: echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ secrets.GHCR_USERNAME }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build and push API
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_PREFIX }}/api:${{ env.VERSION }}
+
+      - name: Build and push Web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/web/Dockerfile
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            API_URL=http://api:3001
+            NEXT_PUBLIC_APP_VERSION=${{ env.VERSION }}
+            NEXT_PUBLIC_BASE_PATH=/deska
+          tags: ${{ env.IMAGE_PREFIX }}/web:${{ env.VERSION }}
+
+      - name: Configure SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+      - name: Add server host key
+        shell: bash
+        run: mkdir -p ~/.ssh && ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Deploy on server
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          ssh "$SERVER_USER@$SERVER_HOST" "DEPLOY_PATH='$DEPLOY_PATH' VERSION='$VERSION' IMAGE_PREFIX='$IMAGE_PREFIX' GHCR_USERNAME='$GHCR_USERNAME' GHCR_TOKEN='$GHCR_TOKEN' bash -s" <<'REMOTE'
+          set -Eeuo pipefail
+          cd "$DEPLOY_PATH"
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin >/dev/null
+          if grep -q '^APP_VERSION=' .env; then sed -i "s/^APP_VERSION=.*/APP_VERSION=$VERSION/" .env; else printf '\nAPP_VERSION=%s\n' "$VERSION" >> .env; fi
+          if grep -q '^IMAGE_PREFIX=' .env; then sed -i "s|^IMAGE_PREFIX=.*|IMAGE_PREFIX=$IMAGE_PREFIX|" .env; else printf '\nIMAGE_PREFIX=%s\n' "$IMAGE_PREFIX" >> .env; fi
+          docker compose pull api web
+          docker compose up -d --no-build --remove-orphans
+          printf '%s' "$VERSION" > .deska-installed-version
+          docker image prune -f >/dev/null
+          REMOTE

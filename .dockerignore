@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/.next
+**/*.tsbuildinfo
+.git
+.github
+.cursor
+.env
+backups
+uploads
+*.dump
+*.pdf
+npm-debug.log*
+pnpm-debug.log*
