@@ -85,8 +85,21 @@ if ($AutoDispatch) {
     $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
     $uri = "https://api.github.com/repos/$owner/$repository/actions/workflows/deploy.yml/dispatches"
     $headers = @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+    $dispatchStarted = (Get-Date).ToUniversalTime()
     Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body (@{ ref = $branch } | ConvertTo-Json) | Out-Null
-    Write-Host 'GitHub Actions deployment started.' -ForegroundColor Green
+    Write-Host 'GitHub Actions deployment started. Waiting for result...' -ForegroundColor Cyan
+    $run = $null
+    for ($attempt = 1; $attempt -le 30 -and -not $run; $attempt++) {
+      Start-Sleep -Seconds 5
+      $runsUri = "https://api.github.com/repos/$owner/$repository/actions/workflows/deploy.yml/runs?branch=$branch&event=workflow_dispatch&per_page=10"
+      $runs = Invoke-RestMethod -Method Get -Uri $runsUri -Headers $headers
+      $run = @($runs.workflow_runs | Where-Object { ([DateTime]$_.created_at).ToUniversalTime() -ge $dispatchStarted } | Select-Object -First 1)
+      if ($run -and $run.status -ne 'completed') { $run = $null }
+      if (-not $run) { Write-Host "Waiting... ($attempt/30)" }
+    }
+    if (-not $run) { throw 'Workflow did not finish within the waiting period. Check GitHub Actions.' }
+    if ($run.conclusion -ne 'success') { throw "Workflow failed: $($run.html_url)" }
+    Write-Host "Deployment completed successfully: $($run.html_url)" -ForegroundColor Green
   } finally {
     if ($tokenPtr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr) }
     $token = $null
