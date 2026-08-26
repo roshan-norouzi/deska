@@ -22,7 +22,7 @@
   input:focus,
   textarea:focus,
   select:focus {
-    @apply border-primary-400 outline-none ring-2 ring-primary-100;
+    @apply border-blue-400 outline-none ring-2 ring-blue-100;
   }
 
   input[inputmode='numeric'],

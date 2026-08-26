@@ -124,6 +124,8 @@ export const MODULE_CATALOG = [
   { id: 'documents', name: 'اسناد', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: true },
   { id: 'calendar', name: 'تقویم', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: true },
   { id: 'hr', name: 'منابع انسانی', domain: MODULE_DOMAINS.HR, version: '1.0.0', dependencies: ['contacts'] },
+  { id: 'projects-tasks', name: 'مدیریت پروژه و تسک', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: false },
+  { id: 'smart-publishing', name: 'نشر هوشمند', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: false },
 ] as const;
 
 /** Modules fully delivered in the product (not auto-enabled for tenants) */
@@ -132,6 +134,8 @@ export const FINALIZED_MODULE_IDS = [
   'documents',
   'calendar',
   'hr',
+  'projects-tasks',
+  'smart-publishing',
 ] as const;
 
 export type FinalizedModuleId = (typeof FINALIZED_MODULE_IDS)[number];
@@ -156,17 +160,17 @@ export const PLATFORM_PLANS: Record<string, PlanLimits> = {
   starter: {
     maxUsers: 5,
     maxStorageMb: 1024,
-    modules: ['contacts', 'documents', 'calendar', 'hr'],
+    modules: ['contacts', 'documents', 'calendar', 'hr', 'projects-tasks', 'smart-publishing'],
   },
   professional: {
     maxUsers: 25,
     maxStorageMb: 10240,
-    modules: ['contacts', 'documents', 'calendar', 'hr'],
+    modules: ['contacts', 'documents', 'calendar', 'hr', 'projects-tasks', 'smart-publishing'],
   },
   enterprise: {
     maxUsers: 999,
     maxStorageMb: 102400,
-    modules: ['contacts', 'documents', 'calendar', 'hr'],
+    modules: ['contacts', 'documents', 'calendar', 'hr', 'projects-tasks', 'smart-publishing'],
   },
 };
 

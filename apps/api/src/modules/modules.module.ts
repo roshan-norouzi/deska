@@ -4,6 +4,8 @@ import { DocumentsModule } from './documents/documents.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { HrModule } from './hr/hr.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { ProjectsModule } from './projects/projects.module';
+import { SmartPublishingModule } from './smart-publishing/smart-publishing.module';
 
 @Module({
   imports: [
@@ -12,6 +14,8 @@ import { DashboardModule } from './dashboard/dashboard.module';
     CalendarModule,
     HrModule,
     DashboardModule,
+    ProjectsModule,
+    SmartPublishingModule,
   ],
   exports: [
     ContactsModule,
@@ -19,6 +23,8 @@ import { DashboardModule } from './dashboard/dashboard.module';
     CalendarModule,
     HrModule,
     DashboardModule,
+    ProjectsModule,
+    SmartPublishingModule,
   ],
 })
 export class BusinessModulesModule {}

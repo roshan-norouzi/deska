@@ -1,0 +1,10 @@
+import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import { RequireModule } from '../../common/decorators/metadata.decorator';
+import { TenantCtx } from '../../common/decorators/params.decorator';
+import type { TenantContext } from '../../common/decorators/params.decorator';
+import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
+import { TenantGuard } from '../../common/guards/tenant.guard';
+import { ModuleEnabledGuard } from '../../common/guards/module-enabled.guard';
+import { ProjectsService } from './projects.service';
+@Controller('projects') @UseGuards(JwtAuthGuard, TenantGuard, ModuleEnabledGuard) @RequireModule('projects-tasks')
+export class ProjectsController { constructor(private service: ProjectsService) {} @Get() list(@TenantCtx() t: TenantContext) { return this.service.list(t.tenantId); } @Post() create(@TenantCtx() t: TenantContext, @Body() b: any) { return this.service.create(t.tenantId, b); } @Patch(':id') update(@TenantCtx() t: TenantContext, @Param('id') id: string, @Body() b: any) { return this.service.update(t.tenantId, id, b); } @Get('tasks') tasks(@TenantCtx() t: TenantContext, @Query('projectId') p?: string) { return this.service.tasks(t.tenantId, p); } @Post('tasks') createTask(@TenantCtx() t: TenantContext, @Body() b: any) { return this.service.createTask(t.tenantId, b); } @Patch('tasks/:id') updateTask(@TenantCtx() t: TenantContext, @Param('id') id: string, @Body() b: any) { return this.service.updateTask(t.tenantId, id, b); } @Post('tasks/:id/checklist') addChecklist(@TenantCtx() t: TenantContext,@Param('id') id:string,@Body() b:any){return this.service.addChecklist(t.tenantId,id,b)} @Patch('checklist/:id') toggleChecklist(@TenantCtx() t: TenantContext,@Param('id') id:string,@Body() b:any){return this.service.toggleChecklist(t.tenantId,id,!!b.isDone)} @Get('tasks/:id/approvals') approvals(@TenantCtx() t: TenantContext,@Param('id') id:string){return this.service.listApprovals(t.tenantId,id)} @Patch('approvals/:id') decide(@TenantCtx() t: TenantContext,@Param('id') id:string,@Body() b:any){return this.service.decideApproval(t.tenantId,id,b)} }

@@ -24,19 +24,20 @@ if (-not $SkipSystemExport -and (Get-Command docker -ErrorAction SilentlyContinu
   Write-Host 'Exporting local system observances...' -ForegroundColor Cyan
   $prismaPath = Join-Path $projectRoot 'apps/api/prisma'
   try {
-    $exported = @(docker compose exec -T api node prisma/export-system-observances.cjs 2>$null)
+    $exported = @(docker compose exec -T api node prisma/export-system-observances.cjs --base64 2>$null)
     if ($LASTEXITCODE -ne 0) {
       Write-Host 'Local API image lacks the exporter; rebuilding it once...' -ForegroundColor Yellow
       docker compose build api | Out-Host
       if ($LASTEXITCODE -ne 0) { throw 'API image build failed.' }
       docker compose up -d api | Out-Host
       if ($LASTEXITCODE -ne 0) { throw 'Unable to start local API.' }
-      $exported = @(docker compose exec -T api node prisma/export-system-observances.cjs 2>$null)
+      $exported = @(docker compose exec -T api node prisma/export-system-observances.cjs --base64 2>$null)
     }
     if ($LASTEXITCODE -ne 0) { throw 'Unable to export system observances.' }
-    $json = ($exported -join [Environment]::NewLine).Trim()
-    if (-not $json.StartsWith('[')) { throw 'Export did not return valid JSON.' }
-    Set-Content -Path (Join-Path $prismaPath 'system-observances.json') -Value $json -Encoding utf8
+    $encoded = ($exported -join '').Trim()
+    try { $bytes = [Convert]::FromBase64String($encoded); $json = [Text.Encoding]::UTF8.GetString($bytes) } catch { throw 'Export did not return valid UTF-8 data.' }
+    if (-not $json.Trim().StartsWith('[')) { throw 'Export did not return valid JSON.' }
+    [IO.File]::WriteAllBytes((Join-Path $prismaPath 'system-observances.json'), $bytes)
     Write-Host 'System observances exported.' -ForegroundColor Green
   } catch {
     throw "System observance export failed: $($_.Exception.Message)"

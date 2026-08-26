@@ -46,7 +46,9 @@ function ModulesContent() {
         method: 'PATCH',
         body: { enabled: !current },
       });
-      await refetch();
+      // فعال/غیرفعال شدن ماژول روی منوی اصلی و دسترسی‌های tenant اثر می‌گذارد؛
+      // بنابراین بعد از ثبت موفق، کل صفحه را برای بارگذاری context جدید refresh می‌کنیم.
+      window.location.reload();
     } catch (err) {
       setToggleError(err instanceof Error ? err.message : 'خطا در تغییر وضعیت ماژول');
     } finally {

@@ -1,0 +1,4 @@
+'use client'
+import { ProtectedLayout } from '@/components/layout/protected-layout'
+import { useApi } from '@/hooks/use-api'
+export default function PublishingPage() { const { data } = useApi<any[]>('/publishing/articles'); const rows=Array.isArray(data)?data:[]; return <ProtectedLayout><main className="p-6 space-y-6" dir="rtl"><h1 className="text-2xl font-bold">نشر هوشمند</h1><p className="text-muted-foreground">مدیریت محتوای پیش‌نویس، زمان‌بندی‌شده و منتشرشده در کانال‌های سازمان.</p><div className="grid gap-3">{rows.map(a=><div key={a.id} className="rounded border p-4"><div className="font-semibold">{a.title}</div><div className="text-sm text-muted-foreground">{a.status} {a.scheduledAt ? `· ${new Date(a.scheduledAt).toLocaleString('fa-IR')}` : ''}</div></div>)}{rows.length===0&&<div className="rounded border p-6 text-muted-foreground">هنوز محتوایی ثبت نشده است.</div>}</div></main></ProtectedLayout> }

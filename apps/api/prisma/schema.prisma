@@ -7,6 +7,189 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ============ PROJECTS & SMART PUBLISHING ============
+model Project {
+  id String @id @default(cuid())
+  tenantId String
+  name String
+  description String?
+  status String @default("active")
+  workType String @default("project")
+  managerId String?
+  parentId String?
+  progressPercent Int @default(0)
+  budget Decimal? @db.Decimal(15,2)
+  cost Decimal? @db.Decimal(15,2)
+  revenue Decimal? @db.Decimal(15,2)
+  archivedAt DateTime?
+  startDate DateTime?
+  dueDate DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  tasks Task[]
+  members ProjectMember[]
+  parent Project? @relation("ProjectTree", fields: [parentId], references: [id], onDelete: SetNull)
+  subProjects Project[] @relation("ProjectTree")
+  @@index([tenantId, status])
+}
+model Task {
+  id String @id @default(cuid())
+  tenantId String
+  projectId String?
+  title String
+  description String?
+  status String @default("todo")
+  priority String @default("normal")
+  assigneeId String?
+  dueDate DateTime?
+  parentId String?
+  recurrenceType String @default("none")
+  recurrenceInterval Int @default(1)
+  recurrenceStartDate DateTime?
+  recurrenceRule Json?
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent Task? @relation("TaskTree", fields: [parentId], references: [id], onDelete: SetNull)
+  subtasks Task[] @relation("TaskTree")
+  checklist ChecklistItem[]
+  approvals ApprovalStep[]
+  @@index([tenantId, status])
+  @@index([tenantId, projectId])
+}
+model ProjectMember {
+  id String @id @default(cuid())
+  projectId String
+  userId String
+  createdAt DateTime @default(now())
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  @@unique([projectId,userId])
+  @@index([userId])
+}
+model ChecklistItem {
+  id String @id @default(cuid())
+  taskId String
+  title String
+  isDone Boolean @default(false)
+  sortOrder Int @default(0)
+  createdAt DateTime @default(now())
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+}
+model ApprovalStep {
+  id String @id @default(cuid())
+  taskId String
+  approverId String
+  stepOrder Int
+  status String @default("pending")
+  comment String?
+  decidedAt DateTime?
+  createdAt DateTime @default(now())
+  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  @@index([taskId])
+}
+model PublishChannel {
+  id String @id @default(cuid())
+  tenantId String
+  name String
+  type String
+  endpoint String?
+  enabled Boolean @default(true)
+  settings Json @default("{}")
+  createdAt DateTime @default(now())
+  articles PublishArticle[]
+  @@index([tenantId, type])
+}
+model PublishArticle {
+  id String @id @default(cuid())
+  tenantId String
+  channelId String?
+  title String
+  body String
+  status String @default("draft")
+  scheduledAt DateTime?
+  publishedAt DateTime?
+  createdById String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  channel PublishChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  @@index([tenantId, status])
+  @@index([tenantId, scheduledAt])
+}
+model NewsFeed {
+  id String @id @default(cuid())
+  tenantId String
+  name String
+  url String
+  enabled Boolean @default(true)
+  lastFetchedAt DateTime?
+  lastError String @default("")
+  createdAt DateTime @default(now())
+  articles NewsArticle[]
+  @@unique([tenantId,url])
+  @@index([tenantId,enabled])
+}
+model NewsArticle {
+  id String @id @default(cuid())
+  tenantId String
+  feedId String?
+  canonicalUrl String
+  originalUrl String @default("")
+  guid String @default("")
+  originalTitle String @default("")
+  originalSummary String @default("")
+  originalContent String @default("")
+  titleFa String @default("")
+  summaryFa String @default("")
+  contentFa String @default("")
+  featuredImageUrl String @default("")
+  status String @default("new")
+  sourceName String @default("")
+  publishedAtSource DateTime?
+  wordpressPostUrl String @default("")
+  lastError String @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  feed NewsFeed? @relation(fields:[feedId],references:[id],onDelete:SetNull)
+  @@unique([tenantId,canonicalUrl])
+  @@index([tenantId,status])
+}
+model SocialFeed {
+  id String @id @default(cuid())
+  tenantId String
+  name String
+  url String
+  category String?
+  isActive Boolean @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  articles SocialArticle[]
+  @@index([tenantId])
+}
+model SocialArticle {
+  id String @id @default(cuid())
+  tenantId String
+  feedId String?
+  title String
+  link String
+  author String?
+  category String?
+  publishedAt DateTime?
+  featuredImageUrl String?
+  originalText String?
+  leadText String?
+  summaryText String?
+  rewrittenText String?
+  readingTime Int?
+  status String @default("pending")
+  telegramSentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  feed SocialFeed? @relation(fields:[feedId],references:[id],onDelete:SetNull)
+  @@unique([tenantId,link])
+  @@index([tenantId,status])
+}
+
 // ============ PLATFORM CORE ============
 
 model User {

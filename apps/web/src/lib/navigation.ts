@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, FileText, Calendar, UserCheck, User, Briefcase, Building2, Settings, ShieldCheck, Puzzle, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Calendar, UserCheck, User, Briefcase, Building2, Settings, ShieldCheck, Puzzle, FolderKanban, Send, type LucideIcon } from 'lucide-react';
 import { MODULE_DOMAINS } from '@deska/shared';
 
 export interface NavItem { href: string; label: string; icon: LucideIcon; moduleId?: string; superAdminOnly?: boolean; }
@@ -10,6 +10,18 @@ export const NAV_GROUPS: NavGroup[] = [
     { href: '/contacts', label: 'مخاطبین', icon: Users, moduleId: 'contacts' },
     { href: '/documents', label: 'اسناد', icon: FileText, moduleId: 'documents' },
     { href: '/calendar', label: 'تقویم', icon: Calendar, moduleId: 'calendar' },
+  ] },
+  { id: 'projects', label: 'مدیریت پروژه و تسک', domain: MODULE_DOMAINS.PRODUCTIVITY, items: [
+    { href: '/projects', label: 'پروژه‌ها', icon: FolderKanban, moduleId: 'projects-tasks' },
+    { href: '/projects/tasks', label: 'تسک‌ها', icon: FolderKanban, moduleId: 'projects-tasks' },
+  ] },
+  { id: 'publishing', label: 'نشر هوشمند', domain: MODULE_DOMAINS.PRODUCTIVITY, items: [
+    { href: '/publishing', label: 'داشبورد نشر', icon: Send, moduleId: 'smart-publishing' },
+    { href: '/publishing/news', label: 'اتاق خبر', icon: Send, moduleId: 'smart-publishing' },
+    { href: '/publishing/social', label: 'استودیوی اجتماعی', icon: Send, moduleId: 'smart-publishing' },
+    { href: '/publishing/daily-report', label: 'دیلی‌ریپورت', icon: Send, moduleId: 'smart-publishing' },
+    { href: '/publishing/channels', label: 'کانال‌های انتشار', icon: Send, moduleId: 'smart-publishing' },
+    { href: '/publishing/settings', label: 'تنظیمات نشر', icon: Send, moduleId: 'smart-publishing' },
   ] },
   { id: 'hr', label: 'منابع انسانی', domain: MODULE_DOMAINS.HR, items: [
     { href: '/hr', label: 'داشبورد HR', icon: LayoutDashboard, moduleId: 'hr' },
