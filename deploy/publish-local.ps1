@@ -98,7 +98,20 @@ if ($AutoDispatch) {
       if (-not $run) { Write-Host "Waiting... ($attempt/30)" }
     }
     if (-not $run) { throw 'Workflow did not finish within the waiting period. Check GitHub Actions.' }
-    if ($run.conclusion -ne 'success') { throw "Workflow failed: $($run.html_url)" }
+    if ($run.conclusion -ne 'success') {
+      $jobsUri = "https://api.github.com/repos/$owner/$repository/actions/runs/$($run.id)/jobs"
+      $jobs = Invoke-RestMethod -Method Get -Uri $jobsUri -Headers $headers
+      $failedStep = @($jobs.jobs | ForEach-Object {
+        $jobName = $_.name
+        $_.steps | Where-Object { $_.conclusion -eq 'failure' } | ForEach-Object {
+          [pscustomobject]@{ Job = $jobName; Step = $_.name }
+        }
+      } | Select-Object -First 1)
+      if ($failedStep.Count -gt 0) {
+        throw "Workflow failed at Job '$($failedStep[0].Job)', Step '$($failedStep[0].Step)': $($run.html_url)"
+      }
+      throw "Workflow failed: $($run.html_url)"
+    }
     Write-Host "Deployment completed successfully: $($run.html_url)" -ForegroundColor Green
   } finally {
     if ($tokenPtr -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($tokenPtr) }

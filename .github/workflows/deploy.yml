@@ -21,6 +21,18 @@ jobs:
         shell: bash
         run: echo "VERSION=$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
 
+      - name: Validate deployment configuration
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          for name in SERVER_HOST SERVER_USER SERVER_SSH_KEY DEPLOY_PATH; do
+            if [ -z "${!name}" ]; then echo "Missing required secret: $name"; exit 1; fi
+          done
+
       - name: Set up Buildx
         uses: docker/setup-buildx-action@v3
 
