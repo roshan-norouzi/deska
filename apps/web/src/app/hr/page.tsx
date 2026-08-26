@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Briefcase, Building2, UserCheck, Users } from 'lucide-react';
+import { Building2, UserCheck, Users } from 'lucide-react';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { useApi } from '@/hooks/use-api';
@@ -10,8 +10,6 @@ import { formatNumber } from '@/lib/date';
 interface DashboardStats {
   employeeCount: number;
   departmentCount: number;
-  openJobs: number;
-  applicantCount: number;
 }
 
 const quickLinks = [
@@ -29,13 +27,6 @@ const quickLinks = [
     icon: Building2,
     accent: 'bg-violet-50 text-violet-700',
   },
-  {
-    href: '/hr/recruitment',
-    label: 'استخدام',
-    description: 'فرصت‌های شغلی و متقاضیان',
-    icon: Briefcase,
-    accent: 'bg-emerald-50 text-emerald-700',
-  },
 ];
 
 export default function HrDashboardPage() {
@@ -44,8 +35,6 @@ export default function HrDashboardPage() {
   const cards = [
     { label: 'کارمندان فعال', value: stats?.employeeCount, icon: UserCheck, accent: 'bg-blue-50 text-blue-700' },
     { label: 'دپارتمان‌ها', value: stats?.departmentCount, icon: Building2, accent: 'bg-violet-50 text-violet-700' },
-    { label: 'فرصت‌های شغلی باز', value: stats?.openJobs, icon: Briefcase, accent: 'bg-emerald-50 text-emerald-700' },
-    { label: 'کل متقاضیان', value: stats?.applicantCount, icon: Users, accent: 'bg-amber-50 text-amber-700' },
   ];
 
   return (
@@ -55,7 +44,7 @@ export default function HrDashboardPage() {
           <p className="text-sm font-semibold text-primary-700">مرکز منابع انسانی</p>
           <h2 className="mt-2 text-2xl font-bold text-slate-900">کارمندان و ساختار سازمانی</h2>
           <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">
-            پرونده‌های پرسنلی، دپارتمان‌ها و فرایند استخدام را از یک فضای یکپارچه مدیریت کنید.
+            پرونده‌های پرسنلی و دپارتمان‌ها را از یک فضای یکپارچه مدیریت کنید.
           </p>
         </header>
 
@@ -82,7 +71,7 @@ export default function HrDashboardPage() {
             <CardTitle>دسترسی سریع</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-2">
               {quickLinks.map((link) => (
                 <Link
                   key={link.href}
@@ -103,4 +92,3 @@ export default function HrDashboardPage() {
     </ProtectedLayout>
   );
 }
-

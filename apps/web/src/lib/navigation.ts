@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, FileText, Calendar, UserCheck, User, Briefcase, Building2, Settings, ShieldCheck, Puzzle, FolderKanban, Send, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Calendar, UserCheck, User, Building2, Settings, ShieldCheck, Puzzle, FolderKanban, Send, type LucideIcon } from 'lucide-react';
 import { MODULE_DOMAINS } from '@deska/shared';
 
 export interface NavItem { href: string; label: string; icon: LucideIcon; moduleId?: string; superAdminOnly?: boolean; }
@@ -27,7 +27,6 @@ export const NAV_GROUPS: NavGroup[] = [
     { href: '/hr', label: 'داشبورد HR', icon: LayoutDashboard, moduleId: 'hr' },
     { href: '/hr/employees', label: 'کارمندان', icon: UserCheck, moduleId: 'hr' },
     { href: '/hr/departments', label: 'دپارتمان‌ها', icon: Building2, moduleId: 'hr' },
-    { href: '/hr/recruitment', label: 'استخدام', icon: Briefcase, moduleId: 'hr' },
   ] },
   { id: 'settings', label: 'تنظیمات', domain: MODULE_DOMAINS.PLATFORM, items: [
     { href: '/settings', label: 'تنظیمات سازمان', icon: Settings },

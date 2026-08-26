@@ -7,7 +7,7 @@ import {
   RECURRENCE_TYPE,
 } from '@deska/shared';
 
-type ContactDateField = 'birthDate' | 'marriageDate' | 'membershipDate';
+type ContactDateField = 'birthDate' | 'marriageDate';
 
 interface ContactDateSpec {
   field: ContactDateField;
@@ -19,7 +19,6 @@ interface ContactDateSpec {
 const CONTACT_DATE_SPECS: ContactDateSpec[] = [
   { field: 'birthDate', entityType: CONTACT_CALENDAR_EVENT_TYPES.BIRTH },
   { field: 'marriageDate', entityType: CONTACT_CALENDAR_EVENT_TYPES.MARRIAGE, skipForCompany: true },
-  { field: 'membershipDate', entityType: CONTACT_CALENDAR_EVENT_TYPES.MEMBERSHIP },
 ];
 
 const CONTACT_EVENT_ENTITY_TYPES = CONTACT_DATE_SPECS.map((spec) => spec.entityType);
@@ -44,7 +43,7 @@ function buildEventTitle(spec: ContactDateSpec, contact: ContactCalendarInput): 
     return `سالگرد ازدواج ${contact.name}`;
   }
 
-  return `سالگرد عضویت ${contact.name}`;
+  return '';
 }
 
 async function upsertContactDateEvent(
@@ -130,6 +129,7 @@ export async function removeContactCalendarEvents(
 }
 
 export async function syncAllContactCalendarEvents(prisma: PrismaClient, tenantId: string) {
+  await prisma.calendarEvent.deleteMany({ where: { tenantId, entityType: CONTACT_CALENDAR_EVENT_TYPES.MEMBERSHIP } });
   const contacts = await prisma.contact.findMany({
     where: { tenantId },
     select: {
@@ -138,7 +138,6 @@ export async function syncAllContactCalendarEvents(prisma: PrismaClient, tenantI
       type: true,
       birthDate: true,
       marriageDate: true,
-      membershipDate: true,
     },
   });
 

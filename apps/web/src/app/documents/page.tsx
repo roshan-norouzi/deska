@@ -82,9 +82,10 @@ function DocumentsContent() {
   const files = Array.isArray(filesData) ? filesData : []
 
   const selectedFolder = folders.find((f) => f.id === selectedFolderId)
-  const showContactColumn =
+  const showEntityColumn =
     selectedFolder?.systemKey === DOCUMENT_SYSTEM_FOLDERS.CONTACT_DOCUMENTS.systemKey ||
-    files.some((f) => f.entityType === 'Contact')
+    selectedFolder?.systemKey === DOCUMENT_SYSTEM_FOLDERS.EMPLOYEE_DOCUMENTS.systemKey ||
+    files.some((f) => f.entityType === 'Contact' || f.entityType === 'Employee')
 
   const handleCreateFolder = async () => {
     const name = newFolderName.trim()
@@ -321,7 +322,7 @@ function DocumentsContent() {
                   <TableRow>
                     <TableHead className="w-16">پیش‌نمایش</TableHead>
                     <TableHead>نام سند</TableHead>
-                    {showContactColumn && <TableHead>مخاطب</TableHead>}
+                    {showEntityColumn && <TableHead>مربوط به</TableHead>}
                     <TableHead>نوع</TableHead>
                     <TableHead>حجم</TableHead>
                     <TableHead>تاریخ</TableHead>
@@ -330,7 +331,7 @@ function DocumentsContent() {
                 </TableHeader>
                 <TableBody>
                   {files.length === 0 ? (
-                    <TableEmpty colSpan={showContactColumn ? 7 : 6} message="فایلی یافت نشد" />
+                    <TableEmpty colSpan={showEntityColumn ? 7 : 6} message="فایلی یافت نشد" />
                   ) : (
                     files.map((file) => (
                       <TableRow key={file.id}>
@@ -342,11 +343,11 @@ function DocumentsContent() {
                           />
                         </TableCell>
                         <TableCell className="font-medium">{file.originalName}</TableCell>
-                        {showContactColumn && (
+                        {showEntityColumn && (
                           <TableCell>
-                            {file.entityType === 'Contact' && file.entityId ? (
+                            {(file.entityType === 'Contact' || file.entityType === 'Employee') && file.entityId ? (
                               <Link
-                                href={`/contacts/${file.entityId}`}
+                                href={file.entityType === 'Employee' ? `/hr/employees/${file.entityId}` : `/contacts/${file.entityId}`}
                                 className="text-primary-600 hover:text-primary-800 hover:underline"
                               >
                                 {file.entityName ?? '—'}

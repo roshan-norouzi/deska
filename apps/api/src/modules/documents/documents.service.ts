@@ -37,6 +37,11 @@ export class DocumentsService {
         DOCUMENT_SYSTEM_FOLDERS.EMPLOYEE_DOCUMENTS.systemKey,
         DOCUMENT_SYSTEM_FOLDERS.EMPLOYEE_DOCUMENTS.name,
       );
+      await this.ensureSystemFolder(
+        tenantId,
+        DOCUMENT_SYSTEM_FOLDERS.ORGANIZATION_DOCUMENTS.systemKey,
+        DOCUMENT_SYSTEM_FOLDERS.ORGANIZATION_DOCUMENTS.name,
+      );
     }
 
     return this.prisma.documentFolder.findMany({
@@ -176,12 +181,32 @@ export class DocumentsService {
 
     const contactMap = new Map(contacts.map((c) => [c.id, c.name]));
 
+    const employeeIds = [
+      ...new Set(
+        files
+          .filter((f) => f.entityType === 'Employee' && f.entityId)
+          .map((f) => f.entityId as string),
+      ),
+    ];
+    const employees = employeeIds.length > 0
+      ? await this.prisma.employee.findMany({
+          where: { tenantId, id: { in: employeeIds } },
+          select: { id: true, firstName: true, lastName: true, employeeCode: true, user: { select: { name: true } } },
+        })
+      : [];
+    const employeeMap = new Map(employees.map((e) => [
+      e.id,
+      `${e.firstName ?? ''} ${e.lastName ?? ''}`.trim() || e.user?.name || e.employeeCode,
+    ]));
+
     return files.map((file) => ({
       ...file,
       entityName:
         file.entityType === 'Contact' && file.entityId
           ? contactMap.get(file.entityId) ?? null
-          : null,
+          : file.entityType === 'Employee' && file.entityId
+            ? employeeMap.get(file.entityId) ?? null
+            : null,
     }));
   }
 

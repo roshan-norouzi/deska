@@ -31,6 +31,19 @@ function FileTypeIcon({ mimeType }: { mimeType: string }) {
   return <File className="h-5 w-5 text-slate-400" />
 }
 
+async function createSmallPreview(blob: Blob): Promise<Blob> {
+  if (!blob.type.startsWith('image/')) return blob
+  const bitmap = await createImageBitmap(blob)
+  const maxSize = 160
+  const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+  canvas.getContext('2d')?.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  bitmap.close()
+  return new Promise((resolve) => canvas.toBlob((small) => resolve(small ?? blob), 'image/webp', 0.72))
+}
+
 export function DocumentPreviewThumb({
   fileId,
   mimeType,
@@ -48,9 +61,10 @@ export function DocumentPreviewThumb({
     let cancelled = false
 
     void apiFetchBlob(`/documents/files/${fileId}/preview`)
-      .then((blob) => {
+      .then((blob) => createSmallPreview(blob))
+      .then((smallBlob) => {
         if (cancelled) return
-        objectUrl = URL.createObjectURL(blob)
+        objectUrl = URL.createObjectURL(smallBlob)
         setRemoteUrl(objectUrl)
         setFailed(false)
       })
