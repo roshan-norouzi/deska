@@ -26,10 +26,11 @@ jobs:
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
           SERVER_SSH_KEY: ${{ secrets.SERVER_SSH_KEY }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
-          for name in SERVER_HOST SERVER_USER SERVER_SSH_KEY DEPLOY_PATH; do
+          for name in SERVER_HOST SERVER_USER SERVER_SSH_KEY DEPLOY_PATH SERVER_PORT; do
             if [ -z "${!name}" ]; then echo "Missing required secret: $name"; exit 1; fi
           done
 
@@ -72,18 +73,19 @@ jobs:
 
       - name: Add server host key
         shell: bash
-        run: mkdir -p ~/.ssh && ssh-keyscan -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
+        run: mkdir -p ~/.ssh && ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Deploy on server
         shell: bash
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
           DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
           GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
           GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
-          ssh "$SERVER_USER@$SERVER_HOST" "DEPLOY_PATH='$DEPLOY_PATH' VERSION='$VERSION' IMAGE_PREFIX='$IMAGE_PREFIX' GHCR_USERNAME='$GHCR_USERNAME' GHCR_TOKEN='$GHCR_TOKEN' bash -s" <<'REMOTE'
+          ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "DEPLOY_PATH='$DEPLOY_PATH' VERSION='$VERSION' IMAGE_PREFIX='$IMAGE_PREFIX' GHCR_USERNAME='$GHCR_USERNAME' GHCR_TOKEN='$GHCR_TOKEN' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           cd "$DEPLOY_PATH"
           if [ -n "${GHCR_TOKEN:-}" ]; then

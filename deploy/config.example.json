@@ -4,5 +4,6 @@
   "branch": "main",
   "serverHost": "pixad.ir",
   "serverUser": "root",
+  "serverPort": 22,
   "deployPath": "/www/wwwroot/pixad.ir/deska"
 }
