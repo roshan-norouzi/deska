@@ -9,6 +9,7 @@ export const PUBLISHING_SETTING_KEYS = [
   'news_poll_interval_minutes',
   'news_max_age_days',
   'wp_site_url',
+  'wp_login_path',
   'wp_username',
   'wp_app_password',
   'wp_post_status',
@@ -35,6 +36,7 @@ export class UpdatePublishingSettingsDto {
   @IsOptional() @IsString() @MaxLength(10) news_poll_interval_minutes?: string;
   @IsOptional() @IsString() @MaxLength(10) news_max_age_days?: string;
   @IsOptional() @IsString() @MaxLength(500) wp_site_url?: string;
+  @IsOptional() @IsString() @MaxLength(200) wp_login_path?: string;
   @IsOptional() @IsString() @MaxLength(200) wp_username?: string;
   @IsOptional() @IsString() @MaxLength(500) wp_app_password?: string;
   @IsOptional() @IsIn(['publish', 'draft', 'pending']) wp_post_status?: string;

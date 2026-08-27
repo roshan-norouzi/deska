@@ -20,6 +20,7 @@ const DEFAULTS: PublishingSettings = {
   news_poll_interval_minutes: '240',
   news_max_age_days: '10',
   wp_post_status: 'publish',
+  wp_login_path: 'wp-admin',
 };
 
 function cleanObject(value: unknown): Record<string, unknown> {
@@ -49,6 +50,15 @@ function boundedInteger(value: string, label: string, min: number, max: number):
   const number = Number(value);
   if (number < min || number > max) throw new BadRequestException(`${label} باید بین ${min} و ${max} باشد`);
   return String(number);
+}
+
+function normalizeLoginPath(value: string): string {
+  const normalized = value.trim().replace(/^\/+|\/+$/g, '');
+  if (!normalized) return 'wp-admin';
+  if (normalized.includes('..') || normalized.includes('?') || normalized.includes('#') || normalized.includes('\\') || !/^[a-zA-Z0-9/_-]+$/.test(normalized)) {
+    throw new BadRequestException('مسیر ورود WordPress معتبر نیست');
+  }
+  return normalized;
 }
 
 @Injectable()
@@ -118,6 +128,7 @@ export class PublishingSettingsService {
 
     next.gapgpt_base_url = normalizeHttpUrl(next.gapgpt_base_url ?? '', 'آدرس GapGPT');
     next.wp_site_url = normalizeHttpUrl(next.wp_site_url ?? '', 'آدرس WordPress');
+    next.wp_login_path = normalizeLoginPath(next.wp_login_path ?? 'wp-admin');
     next.news_poll_interval_minutes = boundedInteger(next.news_poll_interval_minutes ?? '240', 'فاصله پایش', 5, 1440);
     next.news_max_age_days = boundedInteger(next.news_max_age_days ?? '10', 'حداکثر قدمت خبر', 1, 90);
     if (next.wp_category_id && !/^\d+$/.test(next.wp_category_id)) {
