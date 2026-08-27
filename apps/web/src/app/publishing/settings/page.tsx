@@ -10,6 +10,15 @@ import { ApiError, apiFetch } from '@/lib/utils';
 
 type Settings = Record<string, string>;
 
+// These flags are returned by the API only to describe whether a secret is
+// already stored. They are read-only metadata and must never be submitted
+// back to the strict settings DTO.
+function editableSettings(values: Settings): Settings {
+  return Object.fromEntries(
+    Object.entries(values).filter(([key]) => !key.endsWith('_configured')),
+  );
+}
+
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return <label className="grid gap-1.5 text-sm font-medium text-slate-700">{label}{children}{hint && <span className="text-xs font-normal leading-5 text-slate-500">{hint}</span>}</label>;
 }
@@ -33,7 +42,7 @@ export default function PublishingSettingsPage() {
 
   async function save() {
     await run('save', async () => {
-      await apiFetch('/publishing/settings', { method: 'PUT', body: values });
+      await apiFetch('/publishing/settings', { method: 'PUT', body: editableSettings(values) });
       await refetch();
     }, 'تنظیمات نشر هوشمند با موفقیت ذخیره شد.');
   }
@@ -56,7 +65,7 @@ export default function PublishingSettingsPage() {
             <Field label="مدل هوش مصنوعی"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="gpt-4o-mini" value={values.gapgpt_model || ''} onChange={(e) => set('gapgpt_model', e.target.value)} /></Field>
             <Field label="کلید API" hint={values.gapgpt_api_key_configured === 'true' ? 'کلید قبلی ثبت شده است؛ برای حفظ آن، این فیلد را خالی بگذارید.' : 'کلید API حساب GapGPT را وارد کنید.'}><div className="relative"><KeyRound className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="password" dir="ltr" autoComplete="new-password" className="w-full rounded-xl border py-2.5 pl-3 pr-10" placeholder={values.gapgpt_api_key_configured === 'true' ? 'کلید ثبت شده است' : 'API key'} value={values.gapgpt_api_key || ''} onChange={(e) => set('gapgpt_api_key', e.target.value)} /></div></Field>
           </div>
-          <Button className="mt-5" variant="outline" isLoading={busy === 'gapgpt'} onClick={() => run('gapgpt', () => apiFetch('/publishing/settings/test-gapgpt', { method: 'POST', body: values }), 'اتصال GapGPT با موفقیت تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال GapGPT</Button>
+          <Button className="mt-5" variant="outline" isLoading={busy === 'gapgpt'} onClick={() => run('gapgpt', () => apiFetch('/publishing/settings/test-gapgpt', { method: 'POST', body: editableSettings(values) }), 'اتصال GapGPT با موفقیت تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال GapGPT</Button>
         </Card>
 
         <Card className="p-5 sm:p-6">
@@ -80,7 +89,7 @@ export default function PublishingSettingsPage() {
             <Field label="وضعیت مطلب در WordPress"><select className="rounded-xl border px-3 py-2.5" value={values.wp_post_status || 'publish'} onChange={(e) => set('wp_post_status', e.target.value)}><option value="publish">انتشار فوری</option><option value="draft">ذخیره به‌صورت پیش‌نویس</option><option value="pending">در انتظار بازبینی</option></select></Field>
             <Field label="شناسه دسته‌بندی WordPress" hint="اختیاری؛ فقط شناسه عددی دسته را وارد کنید."><input type="text" inputMode="numeric" dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="12" value={values.wp_category_id || ''} onChange={(e) => set('wp_category_id', e.target.value.replace(/\D/g, ''))} /></Field>
           </div>
-          <Button className="mt-5" variant="outline" isLoading={busy === 'wordpress'} onClick={() => run('wordpress', () => apiFetch('/publishing/settings/test-wordpress', { method: 'POST', body: values }), 'اتصال WordPress و دسترسی انتشار تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال WordPress</Button>
+          <Button className="mt-5" variant="outline" isLoading={busy === 'wordpress'} onClick={() => run('wordpress', () => apiFetch('/publishing/settings/test-wordpress', { method: 'POST', body: editableSettings(values) }), 'اتصال WordPress و دسترسی انتشار تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال WordPress</Button>
         </Card>
 
         <div className="flex justify-end"><Button size="lg" isLoading={busy === 'save'} onClick={save}><Save className="h-4 w-4" /> ذخیره همه تنظیمات</Button></div>

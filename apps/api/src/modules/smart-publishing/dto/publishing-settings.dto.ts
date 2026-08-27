@@ -21,6 +21,12 @@ export type PublishingSettingKey = (typeof PUBLISHING_SETTING_KEYS)[number];
 export type PublishingSettings = Partial<Record<PublishingSettingKey, string>>;
 
 export class UpdatePublishingSettingsDto {
+  // Backward-compatible read-only flags from older web bundles. They are
+  // accepted and ignored by the service; secrets are never populated from
+  // these values.
+  @IsOptional() @IsIn(['true', 'false']) gapgpt_api_key_configured?: string;
+  @IsOptional() @IsIn(['true', 'false']) wp_app_password_configured?: string;
+  @IsOptional() @IsIn(['true', 'false']) telegram_bot_token_configured?: string;
   @IsOptional() @IsString() @MaxLength(500) gapgpt_base_url?: string;
   @IsOptional() @IsString() @MaxLength(500) gapgpt_api_key?: string;
   @IsOptional() @IsString() @MaxLength(120) gapgpt_model?: string;
@@ -38,4 +44,3 @@ export class UpdatePublishingSettingsDto {
 }
 
 export class TestPublishingConnectionDto extends UpdatePublishingSettingsDto {}
-
