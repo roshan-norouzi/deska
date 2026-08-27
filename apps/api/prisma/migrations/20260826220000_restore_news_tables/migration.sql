@@ -37,4 +37,14 @@ CREATE TABLE IF NOT EXISTS "NewsArticle" (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS "NewsArticle_tenantId_canonicalUrl_key" ON "NewsArticle"("tenantId", "canonicalUrl");
 CREATE INDEX IF NOT EXISTS "NewsArticle_tenantId_status_idx" ON "NewsArticle"("tenantId", "status");
-ALTER TABLE "NewsArticle" ADD CONSTRAINT "NewsArticle_feedId_fkey" FOREIGN KEY ("feedId") REFERENCES "NewsFeed"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'NewsArticle_feedId_fkey'
+  ) THEN
+    ALTER TABLE "NewsArticle"
+      ADD CONSTRAINT "NewsArticle_feedId_fkey"
+      FOREIGN KEY ("feedId") REFERENCES "NewsFeed"("id")
+      ON DELETE SET NULL ON UPDATE CASCADE;
+  END IF;
+END $$;
