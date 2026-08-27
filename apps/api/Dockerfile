@@ -28,4 +28,4 @@ COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
 COPY --from=builder /app/packages ./packages
 WORKDIR /app/apps/api
 EXPOSE 3001
-CMD ["sh", "-c", "for attempt in $(seq 1 30); do ./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma && exec node dist/main.js; echo \"Database is not ready (attempt $attempt/30); retrying...\"; sleep 3; done; exit 1"]
+CMD ["sh", "-c", "for attempt in $(seq 1 30); do if ./node_modules/.bin/prisma migrate status --schema=./prisma/schema.prisma 2>&1 | grep -q '20260826220000_restore_news_tables'; then ./node_modules/.bin/prisma migrate resolve --rolled-back 20260826220000_restore_news_tables --schema=./prisma/schema.prisma >/dev/null 2>&1 || true; fi; ./node_modules/.bin/prisma migrate deploy --schema=./prisma/schema.prisma && exec node dist/main.js; echo \"Database is not ready (attempt $attempt/30); retrying...\"; sleep 3; done; exit 1"]
