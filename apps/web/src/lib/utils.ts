@@ -10,9 +10,24 @@ const REFRESH_KEY = 'deska_refresh_token';
 const TENANT_KEY = 'deska_tenant_id';
 
 export function withBasePath(path: string): string {
-  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+  const basePath = runtimeBasePath();
   if (!basePath || !path.startsWith('/')) return path;
   return `${basePath.replace(/\/$/, '')}${path}`;
+}
+
+/**
+ * Keep same-origin API calls working when a prebuilt image is mounted under a
+ * sub-path but the build-time base-path variable was not forwarded by the
+ * hosting panel. The explicit value always wins; the browser fallback only
+ * treats an unknown first URL segment as the application mount point.
+ */
+function runtimeBasePath(): string {
+  const configured = process.env.NEXT_PUBLIC_BASE_PATH ?? '';
+  if (configured) return configured;
+  if (typeof window === 'undefined') return '';
+  const first = window.location.pathname.split('/').filter(Boolean)[0] ?? '';
+  const appRoutes = new Set(['login', 'dashboard', 'calendar', 'contacts', 'documents', 'hr', 'projects', 'publishing', 'settings', 'users', 'admin', 'platform']);
+  return first && !appRoutes.has(first) ? `/${first}` : '';
 }
 
 export function getAccessToken(): string | null {
