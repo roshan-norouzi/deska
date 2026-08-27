@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useAuth } from '@/lib/auth-context';
 import { apiFetch } from '@/lib/utils';
-import { KeyRound, User } from 'lucide-react';
+import { KeyRound, User, ShieldCheck } from 'lucide-react';
 
 export default function SettingsAccountPage() {
   const { user } = useAuth();
@@ -54,14 +54,11 @@ export default function SettingsAccountPage() {
 
   return (
     <ProtectedLayout title="حساب کاربری">
-      <div className="mx-auto max-w-lg space-y-6">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">حساب کاربری</h2>
-          <p className="mt-1 text-sm text-slate-500">اطلاعات ورود و تغییر رمز عبور</p>
-        </div>
+      <div className="mx-auto w-full max-w-3xl space-y-6" dir="rtl">
+        <header className="flex items-start gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-emerald-950 p-6 text-white shadow-xl shadow-slate-900/10"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><ShieldCheck className="h-6 w-6" /></span><div><h2 className="text-2xl font-bold">حساب کاربری</h2><p className="mt-2 text-sm text-slate-300">اطلاعات ورود و امنیت حساب خود را مدیریت کنید.</p></div></header>
 
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70">
             <CardTitle className="flex items-center gap-2 text-base">
               <User className="h-4 w-4" />
               اطلاعات کاربر
@@ -81,8 +78,8 @@ export default function SettingsAccountPage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70">
             <CardTitle className="flex items-center gap-2 text-base">
               <KeyRound className="h-4 w-4" />
               تغییر رمز عبور

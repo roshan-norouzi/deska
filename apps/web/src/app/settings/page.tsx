@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Building2 } from 'lucide-react'
 import { ProtectedLayout } from '@/components/layout/protected-layout'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -60,14 +61,11 @@ function SettingsContent() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">تنظیمات سازمان</h2>
-        <p className="mt-1 text-sm text-slate-500">مدیریت اطلاعات سازمان فعال</p>
-      </div>
+    <div className="mx-auto w-full max-w-7xl space-y-6" dir="rtl">
+      <header className="flex items-start gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-indigo-950 p-6 text-white shadow-xl shadow-slate-900/10"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Building2 className="h-6 w-6" /></span><div><h2 className="text-2xl font-bold">تنظیمات سازمان</h2><p className="mt-2 text-sm text-slate-300">مدیریت اطلاعات سازمان فعال و مشخصات پایه آن</p></div></header>
 
-      <Card>
-        <CardHeader>
+      <Card className="mx-auto w-full max-w-3xl overflow-hidden">
+        <CardHeader className="border-b border-slate-100 bg-slate-50/70">
           <CardTitle>اطلاعات عمومی</CardTitle>
         </CardHeader>
         <CardContent>

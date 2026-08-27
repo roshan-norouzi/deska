@@ -111,6 +111,9 @@ export class NewsroomService {
 
   async articles(tenantId: string, status?: string) {
     await this.purgeRejected();
+    if (status && !['new', 'processing', 'ready', 'rejected', 'publishing', 'published', 'failed', 'publish_failed'].includes(status)) {
+      throw new BadRequestException('وضعیت خبر معتبر نیست');
+    }
     return this.prisma.newsArticle.findMany({
       where: { tenantId, ...(status ? { status } : {}) },
       include: { feed: { select: { id: true, name: true, purpose: true } } },
@@ -124,11 +127,16 @@ export class NewsroomService {
     if (['rejected', 'publishing', 'published'].includes(article.status)) {
       throw new BadRequestException('ویرایش خبر در وضعیت فعلی مجاز نیست');
     }
+    const titleFa = data.titleFa !== undefined ? data.titleFa.trim() : article.titleFa;
+    const summaryFa = data.summaryFa !== undefined ? data.summaryFa.trim() : article.summaryFa;
+    if (data.status === 'ready' && (!titleFa || !summaryFa)) {
+      throw new BadRequestException('برای آماده‌کردن خبر، تیتر و خلاصهٔ فارسی الزامی است');
+    }
     return this.prisma.newsArticle.update({
       where: { id },
       data: {
-        ...(data.titleFa !== undefined ? { titleFa: data.titleFa.trim() } : {}),
-        ...(data.summaryFa !== undefined ? { summaryFa: data.summaryFa.trim() } : {}),
+        ...(data.titleFa !== undefined ? { titleFa } : {}),
+        ...(data.summaryFa !== undefined ? { summaryFa } : {}),
         ...(data.status ? { status: data.status } : {}),
       },
     });
@@ -183,8 +191,12 @@ export class NewsroomService {
     }
     const queued = await this.prisma.newsArticle.count({ where: { tenantId, status: 'new' } });
     const failed = results.filter((item) => !item.ok);
-    if (failed.length) throw new BadRequestException(`${failed.length} فید دریافت نشد؛ خطای هر فید در صفحه فیدها ثبت شده است`);
-    return { ok: true, feeds: results, queued };
+    return {
+      ok: failed.length === 0,
+      feeds: results,
+      queued,
+      message: failed.length ? `${failed.length} فید دریافت نشد؛ خطای هر فید در صفحه فیدها ثبت شده است` : 'همه فیدهای اتاق خبر با موفقیت پایش شدند',
+    };
   }
 
   async summarize(tenantId: string, id: string) {
@@ -215,7 +227,7 @@ export class NewsroomService {
 
   async reject(tenantId: string, id: string) {
     const article = await this.findArticle(tenantId, id);
-    if (article.status === 'published') throw new BadRequestException('خبر منتشرشده قابل ردکردن نیست');
+    if (['published', 'rejected'].includes(article.status)) throw new BadRequestException('این خبر قبلاً تعیین تکلیف شده است');
     const rejectedAt = new Date();
     const purgeAfter = new Date(rejectedAt.getTime() + REJECT_RETENTION_MS);
     return this.prisma.newsArticle.update({
@@ -283,8 +295,8 @@ export class NewsroomService {
     }
   }
 
-  async purgeRejected() {
-    return this.prisma.newsArticle.deleteMany({ where: { status: 'rejected', purgeAfter: { lte: new Date() } } });
+  async purgeRejected(tenantId?: string) {
+    return this.prisma.newsArticle.deleteMany({ where: { ...(tenantId ? { tenantId } : {}), status: 'rejected', purgeAfter: { lte: new Date() } } });
   }
 
   @Interval('smart-publishing-newsroom-maintenance', 60_000)

@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { Boxes } from 'lucide-react';
 import { FINALIZED_MODULE_IDS, getCoreModuleSpec } from '@deska/shared';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -95,21 +96,17 @@ function ModulesContent() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold text-slate-900">ماژول‌ها</h2>
-        <p className="mt-1 text-sm text-slate-500">
+    <div className="mx-auto w-full max-w-7xl space-y-6" dir="rtl">
+      <header className="flex items-start gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-violet-950 p-6 text-white shadow-xl shadow-slate-900/10"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Boxes className="h-6 w-6" /></span><div><h2 className="text-2xl font-bold">ماژول‌ها</h2><p className="mt-2 text-sm text-slate-300">
           ماژول‌های موردنیاز سازمان را فعال کنید؛ ماژول‌های هسته همیشه فعال هستند
-        </p>
+        </p></div></header>
         {toggleError && (
           <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
             {toggleError}
           </p>
         )}
-      </div>
-
-      <Card className="border-primary-200 bg-primary-50/30 shadow-sm">
-        <CardHeader>
+      <Card className="overflow-hidden border-primary-200 bg-primary-50/30 shadow-sm">
+        <CardHeader className="border-b border-primary-100 bg-white/60">
           <CardTitle>مدیریت افزونه‌ها</CardTitle>
           <p className="text-sm leading-6 text-slate-500">
             بسته ZIP افزونه را به‌همراه manifest نسخه‌دار نصب یا به‌روزرسانی کنید. پس از نصب، برای بارگذاری routeهای جدید راه‌اندازی مجدد سرویس لازم است.
@@ -166,8 +163,8 @@ function ModulesContent() {
       </Card>
 
       {(installed ?? []).some((module) => module.source === 'plugin') && (
-        <Card className="border-slate-200 shadow-sm">
-          <CardHeader><CardTitle>افزونه‌های نصب‌شده</CardTitle></CardHeader>
+        <Card className="overflow-hidden border-slate-200 shadow-sm">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70"><CardTitle>افزونه‌های نصب‌شده</CardTitle></CardHeader>
           <CardContent className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {(installed ?? []).filter((module) => module.source === 'plugin').map((module) => (
               <div key={module.id} className="rounded-xl border border-slate-200 bg-white p-4">

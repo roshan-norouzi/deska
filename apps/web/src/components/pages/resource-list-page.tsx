@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
+import { FileText, Pencil, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -260,14 +260,14 @@ export function ResourceListPage<T extends { id?: string }>({
     (canEdit && createFields && createFields.length > 0) || canDelete;
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">{title}</h2>
-          {description && <p className="mt-1 text-sm text-slate-500">{description}</p>}
-        </div>
+    <div className="mx-auto w-full max-w-7xl space-y-6" dir="rtl">
+      <header className="flex flex-col gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-blue-950 p-6 text-white shadow-xl shadow-slate-900/10 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-start gap-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><FileText className="h-6 w-6" /></span><div>
+          <h2 className="text-2xl font-bold">{title}</h2>
+          {description && <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">{description}</p>}
+        </div></div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => refetch()}>
+          <Button variant="outline" size="sm" className="border-white/20 bg-white/10 text-white hover:bg-white/15 hover:text-white" onClick={() => refetch()}>
             <RefreshCw className="h-4 w-4" />
             بروزرسانی
           </Button>
@@ -278,7 +278,7 @@ export function ResourceListPage<T extends { id?: string }>({
             </Button>
           )}
         </div>
-      </div>
+      </header>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -286,8 +286,8 @@ export function ResourceListPage<T extends { id?: string }>({
         </div>
       )}
 
-      <Card>
-        <CardHeader>
+      <Card className="overflow-hidden">
+        <CardHeader className="border-b border-slate-100 bg-slate-50/70">
           <CardTitle>لیست</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -368,12 +368,12 @@ export function ResourceListPage<T extends { id?: string }>({
       {modalMode && activeFields && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div
-            className={`w-full rounded-xl bg-white shadow-xl ${hasWideForm ? 'max-w-2xl' : 'max-w-md'}`}
+            className={`w-full overflow-hidden rounded-3xl bg-white shadow-2xl ${hasWideForm ? 'max-w-2xl' : 'max-w-md'}`}
             role="dialog"
             aria-modal="true"
             aria-labelledby="resource-dialog-title"
           >
-            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50/70 px-6 py-5">
               <h3 id="resource-dialog-title" className="text-lg font-semibold">
                 {modalMode === 'create' ? createLabel : editLabel}
               </h3>

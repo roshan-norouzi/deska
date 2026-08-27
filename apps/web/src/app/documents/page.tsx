@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
-import { Download, FolderPlus, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { Download, FileStack, FolderPlus, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { DOCUMENT_SYSTEM_FOLDERS } from '@deska/shared'
 import { ProtectedLayout } from '@/components/layout/protected-layout'
 import { DocumentPreviewThumb } from '@/components/documents/document-preview-thumb'
@@ -187,14 +187,10 @@ function DocumentsContent() {
   }
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold text-slate-900">اسناد</h2>
-          <p className="mt-1 text-sm text-slate-500">مدیریت پوشه‌ها و فایل‌ها</p>
-        </div>
+    <div className="mx-auto w-full max-w-7xl space-y-6" dir="rtl">
+      <header className="flex flex-col gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-cyan-950 p-6 text-white shadow-xl shadow-slate-900/10 sm:flex-row sm:items-center sm:justify-between"><div className="flex items-start gap-4"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><FileStack className="h-6 w-6" /></span><div><h2 className="text-2xl font-bold">اسناد</h2><p className="mt-2 text-sm text-slate-300">مدیریت پوشه‌ها و فایل‌های سازمانی در یک فضای یکپارچه</p></div></div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={handleRefresh}>
+          <Button variant="outline" size="sm" className="border-white/20 bg-white/10 text-white hover:bg-white/15 hover:text-white" onClick={handleRefresh}>
             <RefreshCw className="h-4 w-4" />
             بروزرسانی
           </Button>
@@ -204,15 +200,15 @@ function DocumentsContent() {
           </Button>
           <input ref={fileInputRef} type="file" className="hidden" onChange={handlePickFile} />
         </div>
-      </div>
+      </header>
 
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>
       )}
 
       <div className="grid gap-4 lg:grid-cols-[280px_1fr]">
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70">
             <CardTitle className="text-base">پوشه‌ها</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -304,8 +300,8 @@ function DocumentsContent() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70">
             <CardTitle>
               فایل‌ها
               {selectedFolderId ? ` — ${selectedFolder?.name ?? ''}` : ''}
