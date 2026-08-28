@@ -12,8 +12,13 @@ interface WordPressPost {
 export class WordPressClient {
   private credentials(settings: PublishingSettings) {
     const siteUrl = String(settings.wp_site_url ?? '').trim().replace(/\/$/, '');
-    const username = String(settings.wp_username ?? '').trim();
-    const appPassword = String(settings.wp_app_password ?? '').replace(/\s+/g, '');
+    const username = String(settings.wp_username ?? '').normalize('NFKC').trim();
+    // WordPress core removes every non-alphanumeric character before checking
+    // an Application Password. Mirroring that behavior also handles pasted
+    // spaces, non-breaking spaces, dashes and invisible separators safely.
+    const appPassword = String(settings.wp_app_password ?? '')
+      .normalize('NFKC')
+      .replace(/[^a-z\d]/gi, '');
     if (!siteUrl || !username || !appPassword) {
       throw new BadRequestException('آدرس سایت، نام کاربری و رمز برنامه WordPress را در تنظیمات وارد کنید');
     }
@@ -57,7 +62,7 @@ export class WordPressClient {
       if (!response.ok) {
         if (response.status === 401) {
           if (body.code === 'rest_not_logged_in') {
-            throw new Error('WordPress هدر احراز هویت را دریافت نکرده است؛ تنظیمات Rewrite یا وب‌سرور قبل از رسیدن درخواست به WordPress، هدر Authorization را حذف می‌کند');
+            throw new Error('WordPress کاربر API را واردشده تشخیص نداد؛ ممکن است هدر Authorization به PHP نرسیده باشد یا Application Password حذف، لغو یا نامعتبر شده باشد');
           }
           throw new Error('WordPress احراز هویت را نپذیرفت؛ نام کاربری و Application Password را بررسی کنید و مطمئن شوید REST API یا Application Passwords توسط افزونه امنیتی مسدود نشده است');
         }
