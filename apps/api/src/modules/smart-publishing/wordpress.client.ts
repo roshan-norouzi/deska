@@ -34,12 +34,35 @@ export class WordPressClient {
   async test(settings: PublishingSettings): Promise<{ ok: true; message: string }> {
     const { siteUrl, authorization } = this.credentials(settings);
     try {
-      const response = await fetch(`${siteUrl}/wp-json/wp/v2/users/me?context=edit`, {
-        headers: { Authorization: authorization, Accept: 'application/json' },
+      const headers = {
+        Authorization: authorization,
+        Accept: 'application/json',
+        'User-Agent': 'DESKA-ERP/1.0 WordPress publisher',
+      };
+      // Some security plugins reject the `context=edit` query even though
+      // Application Password authentication itself is valid. Try the normal
+      // endpoint first, then the least restrictive endpoint as a fallback.
+      let response = await fetch(`${siteUrl}/wp-json/wp/v2/users/me?context=edit`, {
+        headers,
         signal: AbortSignal.timeout(20_000),
       });
-      const body = await response.json().catch(() => ({})) as WordPressPost;
-      if (!response.ok) throw new Error(body.message || `HTTP ${response.status}`);
+      let body = await response.json().catch(() => ({})) as WordPressPost;
+      if (!response.ok && response.status === 401) {
+        response = await fetch(`${siteUrl}/wp-json/wp/v2/users/me`, {
+          headers,
+          signal: AbortSignal.timeout(20_000),
+        });
+        body = await response.json().catch(() => ({})) as WordPressPost;
+      }
+      if (!response.ok) {
+        if (response.status === 401) {
+          if (body.code === 'rest_not_logged_in') {
+            throw new Error('WordPress هدر احراز هویت را دریافت نکرده است؛ تنظیمات Rewrite یا وب‌سرور قبل از رسیدن درخواست به WordPress، هدر Authorization را حذف می‌کند');
+          }
+          throw new Error('WordPress احراز هویت را نپذیرفت؛ نام کاربری و Application Password را بررسی کنید و مطمئن شوید REST API یا Application Passwords توسط افزونه امنیتی مسدود نشده است');
+        }
+        throw new Error(body.message || `HTTP ${response.status}`);
+      }
       return { ok: true, message: 'اتصال WordPress و دسترسی انتشار تأیید شد' };
     } catch (error) {
       throw new BadRequestException(`اتصال WordPress برقرار نشد: ${error instanceof Error ? error.message : 'خطای ناشناخته'}`);
