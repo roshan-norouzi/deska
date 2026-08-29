@@ -1,5 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { RequirePermission } from '../../common/decorators/metadata.decorator';
 import { TenantCtx } from '../../common/decorators/params.decorator';
 import type { TenantContext } from '../../common/decorators/params.decorator';
@@ -22,36 +21,6 @@ export class ModulesController {
   @Get('tenant')
   listTenantModules(@TenantCtx() tenant: TenantContext) {
     return this.modulesService.listTenantModules(tenant.tenantId);
-  }
-
-  @Get('installed')
-  @UseGuards(PermissionsGuard)
-  @RequirePermission('modules.manage')
-  listInstalledModules() {
-    return this.modulesService.listInstalledModules();
-  }
-
-  @Post('install')
-  @UseGuards(PermissionsGuard)
-  @UseInterceptors(FileInterceptor('package'))
-  @RequirePermission('modules.manage')
-  installPackage(@Body('manifest') manifest: string, @UploadedFile() file: Express.Multer.File) {
-    return this.modulesService.installPackage(manifest, file);
-  }
-
-  @Post(':id/update')
-  @UseGuards(PermissionsGuard)
-  @UseInterceptors(FileInterceptor('package'))
-  @RequirePermission('modules.manage')
-  updatePackage(@Param('id') id: string, @Body('manifest') manifest: string, @UploadedFile() file: Express.Multer.File) {
-    return this.modulesService.updatePackage(id, manifest, file);
-  }
-
-  @Delete(':id')
-  @UseGuards(PermissionsGuard)
-  @RequirePermission('modules.manage')
-  uninstallPackage(@Param('id') id: string) {
-    return this.modulesService.uninstallPackage(id);
   }
 
   @Patch(':id/toggle')

@@ -7,6 +7,7 @@ import { useAuth } from '@/lib/auth-context';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import Link from 'next/link';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -36,8 +37,8 @@ export default function LoginPage() {
     setError(null);
 
     try {
-      await login(email, password);
-      router.push('/dashboard');
+      const user = await login(email, password);
+      router.push(user.tenants?.length ? '/dashboard' : '/organizations');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطا در ورود');
     } finally {
@@ -81,6 +82,12 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" isLoading={submitting}>
               ورود
             </Button>
+            <p className="text-center text-sm text-slate-500">
+              حساب کاربری ندارید؟{' '}
+              <Link href="/register" className="font-semibold text-primary-700 hover:text-primary-800">
+                ثبت‌نام در دسکا
+              </Link>
+            </p>
           </form>
         </CardContent>
       </Card>

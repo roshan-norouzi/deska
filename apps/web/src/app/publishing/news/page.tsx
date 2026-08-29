@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useApi } from '@/hooks/use-api';
 import { ApiError, apiFetch, cn } from '@/lib/utils';
+import { formatPersianDigits } from '@deska/shared';
 
 type NewsStatus = 'new' | 'processing' | 'ready' | 'rejected' | 'publishing' | 'published' | 'failed' | 'publish_failed';
 
@@ -28,6 +29,7 @@ interface Article {
   purgeAfter: string | null;
   publishedAt: string | null;
   wordpressPostUrl: string;
+  featuredImageUrl: string | null;
   lastError: string;
 }
 
@@ -47,6 +49,8 @@ type Filter = 'active' | 'queued' | NewsStatus | 'all';
 export default function NewsPage() {
   const feedsApi = useApi<Feed[]>('/publishing/feeds');
   const articlesApi = useApi<Article[]>('/publishing/news/articles');
+  const { data: feedData } = feedsApi;
+  const { data: articleData, execute: executeArticles } = articlesApi;
   const [status, setStatus] = useState<Filter>('active');
   const [feedId, setFeedId] = useState('');
   const [query, setQuery] = useState('');
@@ -54,15 +58,15 @@ export default function NewsPage() {
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   useEffect(() => {
-    const timer = window.setInterval(() => { void articlesApi.execute(); }, 15_000);
+    const timer = window.setInterval(() => { void executeArticles(); }, 15_000);
     return () => window.clearInterval(timer);
-  }, [articlesApi.execute]);
+  }, [executeArticles]);
 
-  const feeds = Array.isArray(feedsApi.data) ? feedsApi.data.filter((feed) => feed.purpose === 'news-room') : [];
-  const articles = Array.isArray(articlesApi.data) ? articlesApi.data : [];
+  const feeds = useMemo(() => Array.isArray(feedData) ? feedData.filter((feed) => feed.purpose === 'news-room') : [], [feedData]);
+  const articles = useMemo(() => Array.isArray(articleData) ? articleData : [], [articleData]);
   const rows = useMemo(() => articles.filter((article) => {
     const statusMatches = status === 'all'
-      || (status === 'active' ? article.status !== 'rejected' : status === 'queued' ? ['new', 'processing'].includes(article.status) : article.status === status);
+      || (status === 'active' ? !['rejected', 'published'].includes(article.status) : status === 'queued' ? ['new', 'processing'].includes(article.status) : article.status === status);
     const feedMatches = !feedId || article.feedId === feedId;
     const normalized = query.trim().toLocaleLowerCase('fa');
     const queryMatches = !normalized || `${article.titleFa} ${article.originalTitle} ${article.sourceName}`.toLocaleLowerCase('fa').includes(normalized);
@@ -81,7 +85,7 @@ export default function NewsPage() {
   }
 
   const cards: Array<{ key: Filter; label: string; count: number; tone: string }> = [
-    { key: 'active', label: 'جریان فعال', count: articles.filter((item) => item.status !== 'rejected').length, tone: 'text-slate-900' },
+    { key: 'active', label: 'جریان فعال', count: articles.filter((item) => !['rejected', 'published'].includes(item.status)).length, tone: 'text-slate-900' },
     { key: 'ready', label: 'آماده بررسی', count: articles.filter((item) => item.status === 'ready').length, tone: 'text-emerald-700' },
     { key: 'queued', label: 'در حال پردازش', count: articles.filter((item) => ['new', 'processing'].includes(item.status)).length, tone: 'text-blue-700' },
     { key: 'rejected', label: 'ردشده‌ها', count: articles.filter((item) => item.status === 'rejected').length, tone: 'text-red-700' },
@@ -93,14 +97,14 @@ export default function NewsPage() {
       <main className="mx-auto w-full max-w-7xl space-y-6 p-4 sm:p-6" dir="rtl">
         <header className="flex flex-col gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-blue-950 p-6 text-white shadow-xl shadow-slate-900/10 lg:flex-row lg:items-center lg:justify-between">
           <div className="flex items-start gap-4"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Newspaper className="h-6 w-6" /></span><div><h1 className="text-2xl font-bold">اتاق خبر</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">دریافت خودکار خبر از فیدهای منتخب، آماده‌سازی فارسی با GapGPT و انتشار کنترل‌شده در WordPress.</p></div></div>
-          <div className="flex flex-wrap gap-2"><Link href="/publishing/feeds" className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm hover:bg-white/15"><Rss className="h-4 w-4" /> مدیریت فیدها</Link><Link href="/publishing/settings" className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm hover:bg-white/15"><Settings2 className="h-4 w-4" /> تنظیمات</Link><Button className="bg-white text-slate-900 hover:bg-slate-100" isLoading={busy === 'sync'} onClick={syncNews}><RefreshCw className="h-4 w-4" /> دریافت خبرهای جدید</Button></div>
+          <div className="flex flex-wrap gap-2"><Link href="/publishing/feeds" className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm hover:bg-white/15"><Rss className="h-4 w-4" /> مدیریت فیدها</Link><Link href="/publishing/settings" className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-sm hover:bg-white/15"><Settings2 className="h-4 w-4" /> تنظیمات</Link><Button variant="ghost" className="border border-red-300/40 text-red-100 hover:bg-red-500/20" isLoading={busy === 'delete-all'} onClick={() => { if (window.confirm('همه خبرهای اتاق خبر برای همیشه حذف شوند؟ فیدها و تنظیمات باقی می‌مانند و در پایش بعدی خبرها دوباره دریافت می‌شوند.')) void run('delete-all', () => apiFetch('/publishing/news/articles', { method: 'DELETE' }), 'همه خبرهای اتاق خبر حذف شدند؛ در پایش بعدی دوباره دریافت می‌شوند.'); }}><Trash2 className="h-4 w-4" /> حذف همه مطالب</Button><Button className="bg-white text-slate-900 hover:bg-slate-100" isLoading={busy === 'sync'} onClick={syncNews}><RefreshCw className="h-4 w-4" /> دریافت خبرهای جدید</Button></div>
         </header>
 
         {notice && <div role="status" className={cn('rounded-2xl border px-4 py-3 text-sm', notice.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700')}>{notice.text}</div>}
         {articlesApi.error && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">دریافت خبرها انجام نشد: {articlesApi.error}</div>}
 
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-          {cards.map((card) => <button type="button" key={card.key} onClick={() => setStatus(card.key)} className={cn('rounded-2xl border bg-white p-4 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md', status === card.key ? 'border-primary-400 ring-2 ring-primary-100' : 'border-slate-200')}><div className={cn('text-2xl font-bold', card.tone)}>{card.count}</div><div className="mt-1 text-sm text-slate-500">{card.label}</div></button>)}
+          {cards.map((card) => <button type="button" key={card.key} onClick={() => setStatus(card.key)} className={cn('rounded-2xl border bg-white p-4 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md', status === card.key ? 'border-primary-400 ring-2 ring-primary-100' : 'border-slate-200')}><div className={cn('text-2xl font-bold', card.tone)}>{formatPersianDigits(card.count)}</div><div className="mt-1 text-sm text-slate-500">{card.label}</div></button>)}
         </section>
 
         <Card className="p-4">
@@ -120,6 +124,7 @@ export default function NewsPage() {
               const canSummarize = ['new', 'ready', 'failed'].includes(article.status);
               const canPublish = ['ready', 'publish_failed'].includes(article.status);
               return <article key={article.id} className="flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+                {article.featuredImageUrl && <div className="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-100"><img src={article.featuredImageUrl} alt="تصویر شاخص خبر" className="h-48 w-full object-cover" loading="lazy" /></div>}
                 <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><h3 className="break-words text-lg font-bold leading-8 text-slate-900">{article.titleFa || article.originalTitle}</h3><p className="mt-2 text-xs text-slate-500">منبع: {article.sourceName || 'نامشخص'} · {article.publishedAtSource ? new Date(article.publishedAtSource).toLocaleString('fa-IR') : 'بدون تاریخ منبع'}</p></div><Badge variant={meta.badge}>{meta.label}</Badge></div>
                 <p className="mt-4 flex-1 whitespace-pre-line leading-8 text-slate-700">{article.summaryFa || (article.status === 'processing' ? 'در حال ترجمه و خلاصه‌سازی خبر...' : article.originalSummary || 'خلاصه‌ای برای این خبر ثبت نشده است.')}</p>
                 {article.lastError && <div className="mt-4 flex items-start gap-2 rounded-xl bg-red-50 p-3 text-sm leading-6 text-red-700"><AlertCircle className="mt-1 h-4 w-4 shrink-0" />{article.lastError}</div>}

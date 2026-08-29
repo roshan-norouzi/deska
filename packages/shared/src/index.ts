@@ -5,6 +5,7 @@ export const PLATFORM_TAGLINE = 'سیستم یکپارچه مدیریت سازم
 // Platform roles
 export const PLATFORM_ROLES = {
   SUPER_ADMIN: 'super_admin',
+  ADMIN: 'platform_admin',
   USER: 'user',
 } as const;
 
@@ -17,6 +18,7 @@ export const TENANT_ROLES = {
   MANAGER: 'manager',
   SENIOR_SPECIALIST: 'senior_specialist',
   MEMBER: 'member',
+  VIEWER: 'viewer',
 } as const;
 
 export type TenantRole = (typeof TENANT_ROLES)[keyof typeof TENANT_ROLES];
@@ -27,7 +29,30 @@ export const TENANT_ROLE_LABELS: Record<TenantRole, string> = {
   manager: 'مدیر',
   senior_specialist: 'کارشناس ارشد',
   member: 'کارشناس',
+  viewer: 'مشاهده‌گر',
 };
+
+export const PLATFORM_USER_STATUS = {
+  ACTIVE: 'active',
+  INACTIVE: 'inactive',
+  BLOCKED: 'blocked',
+  PENDING: 'pending',
+} as const;
+
+export const TENANT_STATUS = {
+  ACTIVE: 'active',
+  INACTIVE: 'inactive',
+  SUSPENDED: 'suspended',
+  PENDING: 'pending',
+} as const;
+
+export const MEMBERSHIP_STATUS = {
+  ACTIVE: 'active',
+  INVITED: 'invited',
+  PENDING: 'pending',
+  INACTIVE: 'inactive',
+  REMOVED: 'removed',
+} as const;
 
 /** Roles selectable when adding/editing employees (excludes owner). */
 export const ORGANIZATIONAL_ROLES = [
@@ -35,6 +60,7 @@ export const ORGANIZATIONAL_ROLES = [
   TENANT_ROLES.MANAGER,
   TENANT_ROLES.SENIOR_SPECIALIST,
   TENANT_ROLES.MEMBER,
+  TENANT_ROLES.VIEWER,
 ] as const;
 
 export type OrganizationalRole = (typeof ORGANIZATIONAL_ROLES)[number];
@@ -62,7 +88,7 @@ export const RECURRENCE_CALENDAR = {
   LUNAR: 'lunar',
 } as const;
 
-// HR
+// Employees
 export const EMPLOYEE_STATUS = {
   ACTIVE: 'active',
   INACTIVE: 'inactive',
@@ -84,7 +110,6 @@ export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[keyof typeof CUSTOM_FI
 // Module domains
 export const MODULE_DOMAINS = {
   PLATFORM: 'platform',
-  HR: 'hr',
   PRODUCTIVITY: 'productivity',
 } as const;
 
@@ -92,6 +117,14 @@ export const MODULE_DOMAINS = {
 export const APP_PERMISSIONS = [
   // Platform
   { key: 'platform.admin', label: 'مدیریت پلتفرم', moduleId: 'platform' },
+  { key: 'platform.users.view', label: 'مشاهده کاربران پلتفرم', moduleId: 'platform' },
+  { key: 'platform.users.manage', label: 'مدیریت کاربران پلتفرم', moduleId: 'platform' },
+  { key: 'platform.organizations.view', label: 'مشاهده سازمان‌های پلتفرم', moduleId: 'platform' },
+  { key: 'platform.organizations.manage', label: 'مدیریت سازمان‌های پلتفرم', moduleId: 'platform' },
+  { key: 'organization.members.view', label: 'مشاهده اعضای سازمان', moduleId: 'platform' },
+  { key: 'organization.members.invite', label: 'دعوت عضو سازمان', moduleId: 'platform' },
+  { key: 'organization.members.manage', label: 'مدیریت اعضای سازمان', moduleId: 'platform' },
+  { key: 'organization.owners.manage', label: 'مدیریت مالکان سازمان', moduleId: 'platform' },
   { key: 'dashboard.view', label: 'مشاهده داشبورد', moduleId: 'platform' },
   { key: 'settings.manage', label: 'مدیریت تنظیمات', moduleId: 'platform' },
   { key: 'users.manage', label: 'مدیریت کاربران', moduleId: 'platform' },
@@ -109,21 +142,59 @@ export const APP_PERMISSIONS = [
   // Calendar
   { key: 'calendar.view', label: 'مشاهده تقویم', moduleId: 'calendar' },
   { key: 'calendar.manage', label: 'مدیریت رویدادها', moduleId: 'calendar' },
-  // HR
-  { key: 'hr.employee.view', label: 'مشاهده کارمندان', moduleId: 'hr' },
-  { key: 'hr.employee.manage', label: 'مدیریت کارمندان', moduleId: 'hr' },
-  { key: 'hr.recruitment.view', label: 'مشاهده استخدام', moduleId: 'hr' },
-  { key: 'hr.recruitment.manage', label: 'مدیریت استخدام', moduleId: 'hr' },
+  // Core employees
+  { key: 'employees.view', label: 'مشاهده کارمندان', moduleId: 'employees' },
+  { key: 'employees.manage', label: 'مدیریت کارمندان', moduleId: 'employees' },
+  // Projects
+  { key: 'projects.view', label: 'مشاهده پروژه‌ها و تسک‌ها', moduleId: 'projects-tasks' },
+  { key: 'projects.manage', label: 'مدیریت پروژه‌ها و تسک‌ها', moduleId: 'projects-tasks' },
+  { key: 'projects.approve', label: 'تصمیم‌گیری در تأییدیه‌های پروژه', moduleId: 'projects-tasks' },
+  // Smart publishing
+  { key: 'publishing.view', label: 'مشاهده نشر هوشمند', moduleId: 'smart-publishing' },
+  { key: 'publishing.manage', label: 'مدیریت محتوای نشر هوشمند', moduleId: 'smart-publishing' },
+  { key: 'publishing.publish', label: 'انتشار محتوا', moduleId: 'smart-publishing' },
+  { key: 'publishing.settings', label: 'مدیریت تنظیمات و اتصال‌های نشر', moduleId: 'smart-publishing' },
 ] as const;
 
 export type AppPermission = (typeof APP_PERMISSIONS)[number]['key'];
+
+const VIEW_PERMISSIONS = APP_PERMISSIONS
+  .map((permission) => permission.key)
+  .filter((permission) => permission.endsWith('.view'));
+
+/**
+ * Safe defaults for the built-in organizational roles. A tenant-specific role
+ * definition with the same key/label can override these defaults at runtime.
+ */
+export const DEFAULT_TENANT_ROLE_PERMISSIONS: Record<TenantRole, readonly AppPermission[]> = {
+  owner: APP_PERMISSIONS.map((permission) => permission.key),
+  admin: APP_PERMISSIONS.map((permission) => permission.key),
+  manager: APP_PERMISSIONS
+    .map((permission) => permission.key)
+    .filter((permission) => !permission.startsWith('platform.') && !['users.manage', 'roles.manage', 'modules.manage', 'organization.owners.manage'].includes(permission)),
+  senior_specialist: [
+    ...VIEW_PERMISSIONS,
+    'contacts.create',
+    'contacts.update',
+    'documents.upload',
+    'calendar.manage',
+    'projects.manage',
+    'publishing.manage',
+  ] as AppPermission[],
+  member: VIEW_PERMISSIONS as AppPermission[],
+  viewer: VIEW_PERMISSIONS as AppPermission[],
+};
+
+export function getDefaultPermissionsForTenantRole(role: string): string[] {
+  return [...(DEFAULT_TENANT_ROLE_PERMISSIONS[role as TenantRole] ?? [])];
+}
 
 // Module catalog
 export const MODULE_CATALOG = [
   { id: 'contacts', name: 'مخاطبین', domain: MODULE_DOMAINS.PLATFORM, version: '1.0.0', dependencies: [], isCore: true },
   { id: 'documents', name: 'اسناد', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: true },
   { id: 'calendar', name: 'تقویم', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: true },
-  { id: 'hr', name: 'منابع انسانی', domain: MODULE_DOMAINS.HR, version: '1.0.0', dependencies: ['contacts'] },
+  { id: 'employees', name: 'کارمندان', domain: MODULE_DOMAINS.PLATFORM, version: '1.0.0', dependencies: [], isCore: true },
   { id: 'projects-tasks', name: 'مدیریت پروژه و تسک', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: false },
   { id: 'smart-publishing', name: 'نشر هوشمند', domain: MODULE_DOMAINS.PRODUCTIVITY, version: '1.0.0', dependencies: [], isCore: false },
 ] as const;
@@ -133,7 +204,7 @@ export const FINALIZED_MODULE_IDS = [
   'contacts',
   'documents',
   'calendar',
-  'hr',
+  'employees',
   'projects-tasks',
   'smart-publishing',
 ] as const;
@@ -145,7 +216,6 @@ export const IMPLEMENTED_MODULE_IDS = [...FINALIZED_MODULE_IDS];
 
 export const MODULE_DOMAIN_LABELS: Record<string, string> = {
   [MODULE_DOMAINS.PLATFORM]: 'پلتفرم',
-  [MODULE_DOMAINS.HR]: 'منابع انسانی',
   [MODULE_DOMAINS.PRODUCTIVITY]: 'هسته',
 };
 
@@ -160,17 +230,17 @@ export const PLATFORM_PLANS: Record<string, PlanLimits> = {
   starter: {
     maxUsers: 5,
     maxStorageMb: 1024,
-    modules: ['contacts', 'documents', 'calendar', 'hr', 'projects-tasks', 'smart-publishing'],
+    modules: ['contacts', 'documents', 'calendar', 'employees', 'projects-tasks', 'smart-publishing'],
   },
   professional: {
     maxUsers: 25,
     maxStorageMb: 10240,
-    modules: ['contacts', 'documents', 'calendar', 'hr', 'projects-tasks', 'smart-publishing'],
+    modules: ['contacts', 'documents', 'calendar', 'employees', 'projects-tasks', 'smart-publishing'],
   },
   enterprise: {
     maxUsers: 999,
     maxStorageMb: 102400,
-    modules: ['contacts', 'documents', 'calendar', 'hr', 'projects-tasks', 'smart-publishing'],
+    modules: ['contacts', 'documents', 'calendar', 'employees', 'projects-tasks', 'smart-publishing'],
   },
 };
 
@@ -229,7 +299,7 @@ export * from './core-modules-spec';
 export * from './entity-relations';
 export * from './contacts';
 export * from './iran-locations';
-export * from './hr';
+export * from './employee';
 export * from './iran-banks';
 export * from './employee-profile';
 export * from './persian-calendar';

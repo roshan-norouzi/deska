@@ -1,14 +1,54 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Bot, CheckCircle2, Clock3, Globe2, KeyRound, Save, Settings2, TestTube2 } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, CheckCircle2, Clock3, Copy, Globe2, KeyRound, Plus, Save, Settings2, Share2, Star, TestTube2, Upload, Trash2, Pencil } from 'lucide-react';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
+import { CoverTemplateBuilder, parseTemplate, parseTemplateLibrary, type CoverDemoArticle, type CoverFont, type CoverTemplateLibrary } from '@/components/publishing/cover-template-builder';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useApi } from '@/hooks/use-api';
 import { ApiError, apiFetch } from '@/lib/utils';
 
 type Settings = Record<string, string>;
+type ActiveTab = 'ai' | 'social' | 'news' | 'wordpress';
+const SETTINGS_DRAFT_KEY = 'deska_publishing_settings_draft';
+const SETTINGS_DRAFT_VERSION = 1;
+const SECRET_SETTING_KEYS = new Set(['gapgpt_api_key', 'wp_app_password', 'telegram_bot_token', 'social_instagram_access_token', 'social_linkedin_access_token', 'social_facebook_page_access_token']);
+
+function readSettingsDraft(): Settings {
+  if (typeof window === 'undefined') return {};
+  try {
+    const parsed = JSON.parse(window.sessionStorage.getItem(SETTINGS_DRAFT_KEY) || '{}');
+    return parsed?.version === SETTINGS_DRAFT_VERSION && parsed.values && typeof parsed.values === 'object' && !Array.isArray(parsed.values)
+      ? parsed.values as Settings
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeSettingsDraft(values: Settings) {
+  if (typeof window === 'undefined') return;
+  try {
+    const draft = Object.fromEntries(
+      Object.entries(values).filter(([key]) => !SECRET_SETTING_KEYS.has(key) && !key.endsWith('_configured')),
+    );
+    window.sessionStorage.setItem(SETTINGS_DRAFT_KEY, JSON.stringify({ version: SETTINGS_DRAFT_VERSION, values: draft }));
+  } catch {
+    // Session storage can be disabled or full; the in-memory form still works.
+  }
+}
+
+function parseFontLibrary(value?: string): CoverFont[] {
+  try {
+    const fonts = JSON.parse(value || '[]');
+    if (Array.isArray(fonts)) {
+      const normalized = fonts.map((font, index) => typeof font === 'string' ? { id: `legacy-${index}`, name: font.trim() } : { id: String(font?.id || `font-${index}`), name: String(font?.name || '').trim(), url: font?.url ? String(font.url) : undefined }).filter((font) => font.name);
+      if (normalized.length) return normalized.filter((font) => font.name === 'Vazirmatn' || font.url);
+    }
+  } catch { /* Older settings did not have a font library. */ }
+  return [{ id: 'vazirmatn', name: 'Vazirmatn' }];
+}
 
 // These flags are returned by the API only to describe whether a secret is
 // already stored. They are read-only metadata and must never be submitted
@@ -23,28 +63,203 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   return <label className="grid gap-1.5 text-sm font-medium text-slate-700">{label}{children}{hint && <span className="text-xs font-normal leading-5 text-slate-500">{hint}</span>}</label>;
 }
 
+function FontLibrary({ value, onChange }: { value: CoverFont[]; onChange: (fonts: CoverFont[]) => void }) {
+  const [name, setName] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  async function upload(file: File) {
+    setBusy(true); setError('');
+    try {
+      const form = new FormData(); form.append('file', file); form.append('name', name || file.name.replace(/\.[^.]+$/, ''));
+      const font = await apiFetch<CoverFont>('/publishing/settings/fonts', { method: 'POST', body: form });
+      onChange([...value.filter((item) => item.id !== font.id && item.name !== font.name), font]); setName('');
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : 'بارگذاری فونت انجام نشد');
+    } finally { setBusy(false); }
+  }
+  async function remove(id: string) { setBusy(true); setError(''); try { await apiFetch(`/publishing/settings/fonts/${id}`, { method: 'DELETE' }); onChange(value.filter((font) => font.id !== id)); } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'حذف فونت انجام نشد'); } finally { setBusy(false); } }
+  function rename(id: string) { const next = name.trim(); if (!next || id === 'vazirmatn') return; onChange(value.map((font) => font.id === id ? { ...font, name: next } : font)); setEditing(null); setName(''); }
+  return <div className="mt-6 space-y-5">
+    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4"><h3 className="font-bold text-slate-900">افزودن فونت اختصاصی</h3><p className="mt-1 text-sm leading-6 text-slate-600">فقط فایل‌های woff2، woff، ttf و otf تا حجم ۱۰ مگابایت پذیرفته می‌شوند.</p><div className="mt-4 flex flex-col gap-2 sm:flex-row"><input dir="ltr" className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2.5" placeholder="نام نمایشی فونت (اختیاری)" value={name} onChange={(e) => setName(e.target.value)} /><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><Upload className="h-4 w-4" /> انتخاب و آپلود<input type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf" className="hidden" disabled={busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.currentTarget.value = ''; }} /></label></div></div>
+    {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+    <div className="grid gap-3 sm:grid-cols-2">{value.map((font) => <div key={font.id} className="flex items-center gap-3 rounded-2xl border bg-white p-4 shadow-sm"><span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-lg font-bold text-slate-700">آ</span><div className="min-w-0 flex-1">{editing === font.id ? <input autoFocus dir="ltr" className="w-full rounded-lg border px-2 py-1" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') rename(font.id); }} /> : <p className="truncate font-semibold" dir="ltr">{font.name}</p>}<p className="text-xs text-slate-500">{font.id === 'vazirmatn' ? 'فونت پیش‌فرض سیستم' : 'فونت اختصاصی'}</p></div>{font.id !== 'vazirmatn' && <div className="flex gap-1"><button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="ویرایش نام" onClick={() => { setEditing(font.id); setName(font.name); }}><Pencil className="h-4 w-4" /></button><button type="button" disabled={busy} className="rounded-lg p-2 text-red-600 hover:bg-red-50" title="حذف فونت" onClick={() => void remove(font.id)}><Trash2 className="h-4 w-4" /></button></div>}</div>)}</div>
+    <p className="text-xs leading-5 text-slate-500">برای ثبت تغییر نام، پس از ویرایش روی Enter بزنید و سپس ذخیره را انتخاب کنید.</p>
+  </div>;
+}
+
 export default function PublishingSettingsPage() {
-  const { data, refetch } = useApi<Settings>('/publishing/settings');
+  const { data } = useApi<Settings>('/publishing/settings', { cache: 'no-store' });
+  const { data: socialArticles } = useApi<CoverDemoArticle[]>('/publishing/social/articles');
   const [values, setValues] = useState<Settings>({});
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const [busy, setBusy] = useState<'save' | 'gapgpt' | 'wordpress' | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('ai');
+  const [gapGptModels, setGapGptModels] = useState<string[]>([]);
+  const [subTab, setSubTab] = useState('connection');
+  const [subTabs, setSubTabs] = useState<Record<ActiveTab, string>>({
+    ai: 'connection',
+    social: 'monitor',
+    news: 'schedule',
+    wordpress: 'connection',
+  });
+  const hasLocalEdits = useRef(false);
+  const hasSavedInSession = useRef(false);
+  const [selectedCoverTemplateId, setSelectedCoverTemplateId] = useState('');
+  const coverTemplateLibrary = useMemo(
+    () => parseTemplateLibrary(values.social_image_templates, values.social_image_template),
+    [values.social_image_template, values.social_image_templates],
+  );
+  const selectedCoverTemplate = coverTemplateLibrary.templates.find((item) => item.id === selectedCoverTemplateId)
+    || coverTemplateLibrary.templates.find((item) => item.id === coverTemplateLibrary.defaultTemplateId)
+    || coverTemplateLibrary.templates[0];
+  const availableGapGptModels = useMemo(
+    () => Array.from(new Set([
+      ...gapGptModels,
+      values.gapgpt_model,
+      values.gapgpt_model_news_summary,
+      values.gapgpt_model_news_translation,
+      values.gapgpt_model_social,
+      values.gapgpt_model_daily_report,
+      'gpt-4o-mini',
+    ].filter(Boolean))),
+    [gapGptModels, values],
+  );
 
-  useEffect(() => { if (data) setValues(data); }, [data]);
-  const set = (key: string, value: string) => setValues((current) => ({ ...current, [key]: value }));
+  useEffect(() => {
+    // The first GET may finish after a save. Once this form has received a
+    // confirmed PUT response, never let an older GET overwrite it.
+    if (data && !hasLocalEdits.current && !hasSavedInSession.current) {
+      setValues({ ...data, ...readSettingsDraft() });
+    }
+  }, [data]);
+  useEffect(() => {
+    if (!coverTemplateLibrary.templates.some((item) => item.id === selectedCoverTemplateId)) {
+      setSelectedCoverTemplateId(coverTemplateLibrary.defaultTemplateId || coverTemplateLibrary.templates[0]?.id || '');
+    }
+  }, [coverTemplateLibrary, selectedCoverTemplateId]);
+  const set = (key: string, value: string) => {
+    hasLocalEdits.current = true;
+    setValues((current) => {
+      const next = { ...current, [key]: value };
+      // Keep only fields the user has actually edited. This prevents an old
+      // draft for one tab from masking newer server values in other tabs.
+      writeSettingsDraft({ ...readSettingsDraft(), [key]: value });
+      return next;
+    });
+  };
 
-  async function run(kind: typeof busy, operation: () => Promise<unknown>, success: string) {
+  function setCoverTemplateLibrary(library: CoverTemplateLibrary) {
+    set('social_image_templates', JSON.stringify(library));
+  }
+
+  function addCoverTemplate(copyCurrent = false) {
+    const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `template-${Date.now()}`;
+    const template = copyCurrent && selectedCoverTemplate
+      ? JSON.parse(JSON.stringify(selectedCoverTemplate.template))
+      : JSON.parse(JSON.stringify(parseTemplate('')));
+    const next = { id, name: copyCurrent ? `${selectedCoverTemplate?.name || 'قالب'} - کپی` : `قالب جدید ${coverTemplateLibrary.templates.length + 1}`, template };
+    setCoverTemplateLibrary({ ...coverTemplateLibrary, templates: [...coverTemplateLibrary.templates, next] });
+    setSelectedCoverTemplateId(id);
+  }
+
+  function updateSelectedCoverTemplate(patch: Partial<(typeof coverTemplateLibrary.templates)[number]>) {
+    if (!selectedCoverTemplate) return;
+    setCoverTemplateLibrary({ ...coverTemplateLibrary, templates: coverTemplateLibrary.templates.map((item) => item.id === selectedCoverTemplate.id ? { ...item, ...patch } : item) });
+  }
+
+  function removeSelectedCoverTemplate() {
+    if (!selectedCoverTemplate || coverTemplateLibrary.templates.length <= 1) return;
+    if (!window.confirm(`قالب «${selectedCoverTemplate.name}» حذف شود؟`)) return;
+    const templates = coverTemplateLibrary.templates.filter((item) => item.id !== selectedCoverTemplate.id);
+    const defaultTemplateId = coverTemplateLibrary.defaultTemplateId === selectedCoverTemplate.id ? templates[0].id : coverTemplateLibrary.defaultTemplateId;
+    setCoverTemplateLibrary({ ...coverTemplateLibrary, defaultTemplateId, templates });
+    setSelectedCoverTemplateId(defaultTemplateId);
+  }
+
+  async function run(kind: string, operation: () => Promise<unknown>, success: string) {
     setBusy(kind); setError(''); setMessage('');
     try { await operation(); setMessage(success); }
     catch (reason) { setError(reason instanceof ApiError ? reason.message : 'عملیات انجام نشد'); }
     finally { setBusy(null); }
   }
 
-  async function save() {
+  const tabKeys: Record<ActiveTab, string[]> = {
+    ai: ['gapgpt_base_url', 'gapgpt_api_key', 'gapgpt_model', 'gapgpt_model_news_summary', 'gapgpt_model_news_translation', 'gapgpt_model_social', 'gapgpt_model_daily_report'],
+    social: ['social_poll_interval_minutes', 'social_max_age_days', 'social_caption_template', 'social_image_template', 'social_image_templates', 'social_font_library'],
+    news: ['news_poll_interval_minutes', 'news_max_age_days', 'news_summary_prompt', 'news_full_translation_prompt'],
+    wordpress: ['wp_site_url', 'wp_login_path', 'wp_username', 'wp_app_password', 'wp_post_status', 'wp_category_id'],
+  };
+
+  function selectTab(tab: ActiveTab) {
+    setActiveTab(tab);
+    setSubTab(subTabs[tab]);
+  }
+
+  async function loadGapGptModels() {
+    setBusy('gapgpt-models'); setError(''); setMessage('');
+    try {
+      const response = await apiFetch<{ models?: string[] }>('/publishing/settings/gapgpt-models', {
+        method: 'POST',
+        body: editableSettings(Object.fromEntries(['gapgpt_base_url', 'gapgpt_api_key'].map((key) => [key, values[key] ?? '']))),
+      });
+      setGapGptModels(Array.isArray(response.models) ? response.models.filter(Boolean) : []);
+      setMessage('فهرست مدل‌های GapGPT دریافت شد.');
+    } catch (reason) {
+      setError(reason instanceof ApiError ? reason.message : 'دریافت فهرست مدل‌ها انجام نشد');
+    } finally { setBusy(null); }
+  }
+
+  function selectSubTab(tab: string) {
+    setSubTab(tab);
+    setSubTabs((current) => ({ ...current, [activeTab]: tab }));
+  }
+
+  async function saveTab(tab: ActiveTab) {
     await run('save', async () => {
-      await apiFetch('/publishing/settings', { method: 'PUT', body: editableSettings(values) });
-      await refetch();
-    }, 'تنظیمات نشر هوشمند با موفقیت ذخیره شد.');
+      const keys = tab === 'social'
+        ? subTab === 'monitor' ? ['social_poll_interval_minutes', 'social_max_age_days']
+          : subTab === 'caption' ? ['social_caption_template']
+          : subTab === 'image' ? ['social_image_templates']
+              : subTab === 'networks' ? ['telegram_bot_token', 'telegram_chat_id', 'telegram_bridge_url', 'social_instagram_access_token', 'social_instagram_account_id', 'social_instagram_api_version', 'social_linkedin_access_token', 'social_linkedin_author_urn', 'social_linkedin_api_version', 'social_facebook_page_access_token', 'social_facebook_page_id', 'social_facebook_api_version', 'social_public_media_base_url']
+                : ['social_font_library']
+        : tab === 'news'
+          ? subTab === 'schedule' ? ['news_poll_interval_minutes', 'news_max_age_days']
+            : subTab === 'wordpress' ? tabKeys.wordpress
+              : ['news_summary_prompt', 'news_full_translation_prompt']
+          : tabKeys[tab];
+      const body = Object.fromEntries(keys.map((key) => [key, values[key] ?? '']));
+      const saved = await apiFetch<Settings>('/publishing/settings', { method: 'PUT', body: editableSettings(body) });
+      // Keep the confirmed server response in the form immediately; a late
+      // initial GET must not overwrite values just saved by the user.
+      hasLocalEdits.current = false;
+      hasSavedInSession.current = true;
+      setValues((current) => {
+        const merged = { ...current, ...saved };
+        // The API intentionally never returns secret values. Keep the value
+        // just entered visible in this session while the configured flag
+        // confirms that it is safely stored server-side.
+        for (const key of SECRET_SETTING_KEYS) {
+          if (current[key] && !saved[key]) merged[key] = current[key];
+        }
+        return merged;
+      });
+      const draft = readSettingsDraft();
+      for (const key of keys) delete draft[key];
+      writeSettingsDraft(draft);
+    }, 'تنظیمات این بخش با موفقیت ذخیره شد.');
+  }
+
+  async function testSocial(network: 'telegram' | 'instagram' | 'linkedin' | 'facebook') {
+    const keys = network === 'telegram'
+      ? ['telegram_bot_token', 'telegram_chat_id', 'telegram_bridge_url']
+      : network === 'instagram'
+        ? ['social_instagram_access_token', 'social_instagram_account_id', 'social_instagram_api_version']
+        : network === 'linkedin'
+          ? ['social_linkedin_access_token', 'social_linkedin_author_urn', 'social_linkedin_api_version']
+          : ['social_facebook_page_access_token', 'social_facebook_page_id', 'social_facebook_api_version'];
+    await run(`test-${network}`, () => apiFetch(`/publishing/settings/test-social/${network}`, { method: 'POST', body: editableSettings(Object.fromEntries(keys.map((key) => [key, values[key] ?? '']))) }), `اتصال ${network === 'telegram' ? 'تلگرام' : network === 'instagram' ? 'اینستاگرام' : network === 'linkedin' ? 'لینکدین' : 'فیسبوک'} با موفقیت تأیید شد.`);
   }
 
   return (
@@ -52,35 +267,69 @@ export default function PublishingSettingsPage() {
       <main className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6" dir="rtl">
         <header className="flex flex-col gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-blue-950 p-6 text-white shadow-xl shadow-slate-900/10 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-4"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Settings2 className="h-6 w-6" /></span><div><h1 className="text-2xl font-bold">تنظیمات نشر هوشمند</h1><p className="mt-2 text-sm leading-6 text-slate-300">اتصال امن GapGPT، پایش خبرها و انتشار مستقیم در WordPress.</p></div></div>
-          <Button className="bg-white text-slate-900 hover:bg-slate-100" isLoading={busy === 'save'} onClick={save}><Save className="h-4 w-4" /> ذخیره تنظیمات</Button>
         </header>
 
         {error && <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
         {message && <div role="status" className="flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800"><CheckCircle2 className="h-4 w-4" />{message}</div>}
 
-        <Card className="p-5 sm:p-6">
+        <nav role="tablist" className="grid grid-cols-2 gap-2 rounded-2xl border bg-white p-2 shadow-sm sm:grid-cols-3" aria-label="دسته‌بندی تنظیمات">
+          {([['ai', 'هوش مصنوعی', Bot], ['social', 'استودیوی اجتماعی', Share2], ['news', 'پایش خبر', Clock3]] as const).map(([tab, label, Icon]) => <button role="tab" type="button" key={tab} onClick={() => selectTab(tab)} className={`flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-sm font-semibold transition ${activeTab === tab ? 'bg-slate-900 text-white shadow-md' : 'text-slate-600 hover:bg-slate-100'}`} aria-selected={activeTab === tab} tabIndex={activeTab === tab ? 0 : -1}><Icon className="h-4 w-4" />{label}</button>)}
+        </nav>
+
+        {activeTab !== 'ai' && <nav role="tablist" className="flex flex-wrap gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2" aria-label="زیرمجموعه تنظیمات">
+          {(activeTab === 'social' ? [['monitor', 'پایش فیدها'], ['caption', 'قالب کپشن'], ['image', 'قالب تصویری'], ['networks', 'شبکه‌های اجتماعی'], ['fonts', 'کتابخانه فونت']] : activeTab === 'news' ? [['schedule', 'زمان‌بندی پایش'], ['prompts', 'پرامپت‌ها'], ['wordpress', 'WordPress']] : [['connection', 'اتصال و انتشار']]).map(([tab, label]) => <button role="tab" type="button" key={tab} onClick={() => selectSubTab(tab)} className={`rounded-xl px-4 py-2 text-sm font-medium transition ${subTab === tab ? 'bg-white text-blue-700 shadow-sm ring-1 ring-blue-100' : 'text-slate-600 hover:bg-white'}`} aria-selected={subTab === tab} tabIndex={subTab === tab ? 0 : -1}>{label}</button>)}
+        </nav>}
+
+        {activeTab === 'ai' && <Card className="p-5 sm:p-6">
           <div className="flex items-start gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-blue-50 text-blue-700"><Bot className="h-5 w-5" /></span><div><h2 className="text-lg font-bold text-slate-900">هوش مصنوعی GapGPT</h2><p className="mt-1 text-sm text-slate-500">این کلید فقط در سرور نگهداری می‌شود و دوباره به مرورگر برگردانده نمی‌شود.</p></div></div>
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <Field label="آدرس پایه API" hint="آدرسی را وارد کنید که به مسیرهای models و chat/completions متصل می‌شود."><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="https://api.example.com/v1" value={values.gapgpt_base_url || ''} onChange={(e) => set('gapgpt_base_url', e.target.value)} /></Field>
-            <Field label="مدل هوش مصنوعی"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="gpt-4o-mini" value={values.gapgpt_model || ''} onChange={(e) => set('gapgpt_model', e.target.value)} /></Field>
             <Field label="کلید API" hint={values.gapgpt_api_key_configured === 'true' ? 'کلید قبلی ثبت شده است؛ برای حفظ آن، این فیلد را خالی بگذارید.' : 'کلید API حساب GapGPT را وارد کنید.'}><div className="relative"><KeyRound className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" /><input type="password" dir="ltr" autoComplete="new-password" className="w-full rounded-xl border py-2.5 pl-3 pr-10" placeholder={values.gapgpt_api_key_configured === 'true' ? 'کلید ثبت شده است' : 'API key'} value={values.gapgpt_api_key || ''} onChange={(e) => set('gapgpt_api_key', e.target.value)} /></div></Field>
+            <Field label="مدل پیش‌فرض (سازگاری)" hint="برای فعالیت‌هایی که مدل اختصاصی ندارند استفاده می‌شود."><select dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.gapgpt_model || 'gpt-4o-mini'} onChange={(e) => set('gapgpt_model', e.target.value)}>{availableGapGptModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></Field>
+            <Field label="مدل خلاصه‌سازی خبر" hint="برای آماده‌سازی عنوان و خلاصه فارسی در اتاق خبر."><select dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.gapgpt_model_news_summary || values.gapgpt_model || 'gpt-4o-mini'} onChange={(e) => set('gapgpt_model_news_summary', e.target.value)}>{availableGapGptModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></Field>
+            <Field label="مدل ترجمه کامل خبر" hint="برای ترجمه متن کامل خبر هنگام انتشار در WordPress."><select dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.gapgpt_model_news_translation || values.gapgpt_model || 'gpt-4o-mini'} onChange={(e) => set('gapgpt_model_news_translation', e.target.value)}>{availableGapGptModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></Field>
+            <Field label="مدل استودیوی اجتماعی" hint="برای تولید لید و خلاصه اجتماعی فارسی."><select dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.gapgpt_model_social || values.gapgpt_model || 'gpt-4o-mini'} onChange={(e) => set('gapgpt_model_social', e.target.value)}>{availableGapGptModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></Field>
+            <Field label="مدل گزارش روزانه" hint="برای تولید تیتر و بولت‌های انگلیسی گزارش روزانه."><select dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.gapgpt_model_daily_report || values.gapgpt_model || 'gpt-4o-mini'} onChange={(e) => set('gapgpt_model_daily_report', e.target.value)}>{availableGapGptModels.map((model) => <option key={model} value={model}>{model}</option>)}</select></Field>
           </div>
-          <Button className="mt-5" variant="outline" isLoading={busy === 'gapgpt'} onClick={() => run('gapgpt', () => apiFetch('/publishing/settings/test-gapgpt', { method: 'POST', body: editableSettings(values) }), 'اتصال GapGPT با موفقیت تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال GapGPT</Button>
-        </Card>
+          <div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" isLoading={busy === 'gapgpt-models'} onClick={() => void loadGapGptModels()}><Bot className="h-4 w-4" /> دریافت فهرست مدل‌ها</Button><Button variant="outline" isLoading={busy === 'gapgpt'} onClick={() => run('gapgpt', () => apiFetch('/publishing/settings/test-gapgpt', { method: 'POST', body: editableSettings(Object.fromEntries(['gapgpt_base_url', 'gapgpt_api_key'].map((key) => [key, values[key] ?? '']))) }), 'اتصال GapGPT با موفقیت تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال GapGPT</Button><Button isLoading={busy === 'save'} onClick={() => saveTab('ai')}><Save className="h-4 w-4" /> ذخیره</Button></div>
+          <p className="mt-3 text-xs leading-5 text-slate-500">برای تازه‌سازی گزینه‌ها، آدرس و کلید را وارد کنید و روی «دریافت فهرست مدل‌ها» بزنید.</p>
+        </Card>}
 
-        <Card className="p-5 sm:p-6">
+        {activeTab === 'social' && <Card className="p-5 sm:p-6">
+          <div className="flex items-start gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-700"><Share2 className="h-5 w-5" /></span><div><h2 className="text-lg font-bold text-slate-900">قالب‌های استودیوی اجتماعی</h2><p className="mt-1 text-sm text-slate-500">ساختار کپشن و دستور طراحی تصویر برای تمام مطالب اجتماعی از اینجا مدیریت می‌شود.</p></div></div>
+          {subTab === 'monitor' && <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <Field label="فاصله پایش فیدهای اجتماعی (دقیقه)" hint="مقدار معتبر بین ۵ تا ۱۴۴۰ دقیقه است."><input type="number" min="5" max="1440" inputMode="numeric" dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.social_poll_interval_minutes || '240'} onChange={(e) => set('social_poll_interval_minutes', e.target.value)} /></Field>
+            <Field label="حداکثر قدمت مطلب اجتماعی (روز)" hint="مطالب قدیمی‌تر هنگام پایش وارد استودیو نمی‌شوند."><input type="number" min="1" max="90" inputMode="numeric" dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.social_max_age_days || '10'} onChange={(e) => set('social_max_age_days', e.target.value)} /></Field>
+          </div>}
+          {subTab === 'caption' && <div className="mt-6 grid gap-5"><Field label="قالب کپشن" hint={'متغیرهای مجاز: {title}، {lead}، {author}، {category}، {reading_time}، {summary}، {link} و {source}. برای قالب‌بندی تلگرام از تگ‌های HTML مانند <b>، <i>، <u>، <a href="https://example.com"> و <code> استفاده کنید.'}><textarea dir="rtl" className="min-h-64 rounded-xl border px-3 py-3 leading-7" placeholder={'<b>{title}</b>\n\n{lead}\n\nنویسنده: {author}\nدسته‌بندی: {category}\nزمان مطالعه: {reading_time} دقیقه\n\n{summary}\n\n<a href="{link}">مطالعه مطلب</a>'} value={values.social_caption_template || ''} onChange={(e) => set('social_caption_template', e.target.value)} /></Field></div>}
+          {subTab === 'image' && <div className="mt-6 grid gap-5">
+            <div><h3 className="font-bold text-slate-900">کتابخانه قالب‌های تصویری</h3><p className="mt-1 text-sm leading-6 text-slate-500">چند قالب مستقل بسازید و هنگام تولید تصویر، قالب موردنظر را انتخاب کنید. تغییرات همه قالب‌ها با دکمه ذخیره پایین صفحه ثبت می‌شوند.</p></div>
+            <div className="grid gap-3 rounded-2xl border border-violet-100 bg-violet-50/50 p-4 lg:grid-cols-[minmax(180px,1fr)_minmax(220px,1fr)_auto]">
+              <label className="grid gap-1 text-xs font-medium text-slate-600">قالب در حال ویرایش<select className="rounded-xl border bg-white px-3 py-2.5 text-sm" value={selectedCoverTemplate?.id || ''} onChange={(event) => setSelectedCoverTemplateId(event.target.value)}>{coverTemplateLibrary.templates.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === coverTemplateLibrary.defaultTemplateId ? ' (پیش‌فرض)' : ''}</option>)}</select></label>
+              <label className="grid gap-1 text-xs font-medium text-slate-600">نام قالب<input className="rounded-xl border bg-white px-3 py-2.5 text-sm" maxLength={80} value={selectedCoverTemplate?.name || ''} onChange={(event) => updateSelectedCoverTemplate({ name: event.target.value })} /></label>
+              <div className="flex flex-wrap items-end gap-2"><Button type="button" size="sm" onClick={() => addCoverTemplate(false)}><Plus className="h-4 w-4" /> قالب جدید</Button><Button type="button" size="sm" variant="outline" onClick={() => addCoverTemplate(true)}><Copy className="h-4 w-4" /> کپی قالب</Button><Button type="button" size="sm" variant="outline" disabled={!selectedCoverTemplate || selectedCoverTemplate.id === coverTemplateLibrary.defaultTemplateId} onClick={() => selectedCoverTemplate && setCoverTemplateLibrary({ ...coverTemplateLibrary, defaultTemplateId: selectedCoverTemplate.id })}><Star className="h-4 w-4" /> پیش‌فرض</Button><Button type="button" size="sm" variant="outline" className="text-red-600" disabled={coverTemplateLibrary.templates.length <= 1} onClick={removeSelectedCoverTemplate}><Trash2 className="h-4 w-4" /> حذف</Button></div>
+            </div>
+            {selectedCoverTemplate && <CoverTemplateBuilder key={selectedCoverTemplate.id} value={JSON.stringify(selectedCoverTemplate.template)} onChange={(templateValue) => updateSelectedCoverTemplate({ template: parseTemplate(templateValue) })} fontLibrary={parseFontLibrary(values.social_font_library)} demoArticle={socialArticles?.find((article) => article.authorImageUrl || article.featuredImageUrl) || socialArticles?.[0]} />}
+          </div>}
+          {subTab === 'networks' && <div className="mt-6 space-y-6"><div className="rounded-2xl border border-violet-100 bg-violet-50/60 p-4"><h3 className="font-bold text-slate-900">اتصال شبکه‌های اجتماعی</h3><p className="mt-1 text-sm leading-6 text-slate-600">توکن‌ها فقط در سرور و به‌صورت رمزنگاری‌شده نگهداری می‌شوند. برای حفظ اتصال قبلی، فیلد رمز را خالی بگذارید.</p></div><div className="grid gap-4 md:grid-cols-2"><Field label="توکن ربات تلگرام" hint={values.telegram_bot_token_configured === 'true' ? 'توکن قبلی ثبت شده است.' : 'توکن BotFather را وارد کنید.'}><input type="password" dir="ltr" autoComplete="new-password" className="rounded-xl border px-3 py-2.5" placeholder={values.telegram_bot_token_configured === 'true' ? 'توکن ثبت شده است' : '123456:ABC...'} value={values.telegram_bot_token || ''} onChange={(e) => set('telegram_bot_token', e.target.value)} /></Field><Field label="شناسه کانال یا گفت‌وگوی تلگرام" hint="ربات باید در کانال دسترسی ارسال داشته باشد."><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="@channel یا -100..." value={values.telegram_chat_id || ''} onChange={(e) => set('telegram_chat_id', e.target.value)} /></Field><Field label="آدرس Worker واسط تلگرام" hint="اختیاری؛ برای دورزدن محدودیت دسترسی مستقیم سرور به تلگرام استفاده می‌شود."><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="https://telegram-bridge.example.workers.dev/" value={values.telegram_bridge_url || ''} onChange={(e) => set('telegram_bridge_url', e.target.value)} /></Field></div><div className="flex justify-end"><Button variant="outline" isLoading={busy === 'test-telegram'} onClick={() => void testSocial('telegram')}><TestTube2 className="h-4 w-4" /> تست اتصال تلگرام</Button></div><div className="rounded-2xl border border-pink-100 bg-pink-50/50 p-4"><h3 className="font-bold text-slate-900">اینستاگرام</h3><p className="mt-1 text-xs leading-5 text-slate-600">نیازمند حساب Professional، شناسه Instagram Business و توکن Graph API است. آدرس عمومی تصویر برای انتشار لازم است.</p><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Access Token اینستاگرام" hint={values.social_instagram_access_token_configured === 'true' ? 'توکن قبلی ثبت شده است.' : 'توکن را وارد کنید.'}><input type="password" dir="ltr" autoComplete="new-password" className="rounded-xl border px-3 py-2.5" placeholder={values.social_instagram_access_token_configured === 'true' ? 'توکن ثبت شده است' : 'Access token'} value={values.social_instagram_access_token || ''} onChange={(e) => set('social_instagram_access_token', e.target.value)} /></Field><Field label="شناسه حساب Instagram Business"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="1784..." value={values.social_instagram_account_id || ''} onChange={(e) => set('social_instagram_account_id', e.target.value)} /></Field><Field label="نسخه Graph API"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="v23.0" value={values.social_instagram_api_version || ''} onChange={(e) => set('social_instagram_api_version', e.target.value)} /></Field></div><div className="mt-3 flex justify-end"><Button variant="outline" isLoading={busy === 'test-instagram'} onClick={() => void testSocial('instagram')}><TestTube2 className="h-4 w-4" /> تست اتصال اینستاگرام</Button></div></div><div className="rounded-2xl border border-blue-100 bg-blue-50/50 p-4"><h3 className="font-bold text-slate-900">لینکدین</h3><p className="mt-1 text-xs leading-5 text-slate-600">شناسه نویسنده باید URN شخص یا سازمانی باشد که توکن به آن دسترسی انتشار دارد.</p><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Access Token لینکدین" hint={values.social_linkedin_access_token_configured === 'true' ? 'توکن قبلی ثبت شده است.' : 'توکن را وارد کنید.'}><input type="password" dir="ltr" autoComplete="new-password" className="rounded-xl border px-3 py-2.5" placeholder={values.social_linkedin_access_token_configured === 'true' ? 'توکن ثبت شده است' : 'Access token'} value={values.social_linkedin_access_token || ''} onChange={(e) => set('social_linkedin_access_token', e.target.value)} /></Field><Field label="URN نویسنده یا سازمان"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="urn:li:person:..." value={values.social_linkedin_author_urn || ''} onChange={(e) => set('social_linkedin_author_urn', e.target.value)} /></Field><Field label="نسخه API لینکدین"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="202501" value={values.social_linkedin_api_version || ''} onChange={(e) => set('social_linkedin_api_version', e.target.value)} /></Field></div><div className="mt-3 flex justify-end"><Button variant="outline" isLoading={busy === 'test-linkedin'} onClick={() => void testSocial('linkedin')}><TestTube2 className="h-4 w-4" /> تست اتصال لینکدین</Button></div></div><div className="rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4"><h3 className="font-bold text-slate-900">فیسبوک</h3><p className="mt-1 text-xs leading-5 text-slate-600">از Page Access Token و شناسه صفحه‌ای استفاده کنید که مجوز انتشار تصویر دارد.</p><div className="mt-4 grid gap-4 md:grid-cols-2"><Field label="Page Access Token فیسبوک" hint={values.social_facebook_page_access_token_configured === 'true' ? 'توکن قبلی ثبت شده است.' : 'توکن را وارد کنید.'}><input type="password" dir="ltr" autoComplete="new-password" className="rounded-xl border px-3 py-2.5" placeholder={values.social_facebook_page_access_token_configured === 'true' ? 'توکن ثبت شده است' : 'Page access token'} value={values.social_facebook_page_access_token || ''} onChange={(e) => set('social_facebook_page_access_token', e.target.value)} /></Field><Field label="شناسه صفحه فیسبوک"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="123456789" value={values.social_facebook_page_id || ''} onChange={(e) => set('social_facebook_page_id', e.target.value)} /></Field><Field label="نسخه Graph API"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="v23.0" value={values.social_facebook_api_version || ''} onChange={(e) => set('social_facebook_api_version', e.target.value)} /></Field></div><div className="mt-3 flex justify-end"><Button variant="outline" isLoading={busy === 'test-facebook'} onClick={() => void testSocial('facebook')}><TestTube2 className="h-4 w-4" /> تست اتصال فیسبوک</Button></div></div><Field label="آدرس عمومی فایل‌های رسانه‌ای" hint="برای اینستاگرام لازم است APIهای Meta بتوانند تصویر را از اینترنت دریافت کنند؛ در محیط محلی باید دامنه عمومی یا تونل امن تنظیم شود."><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="https://public.example.com" value={values.social_public_media_base_url || ''} onChange={(e) => set('social_public_media_base_url', e.target.value)} /></Field></div>}
+          {subTab === 'fonts' && <FontLibrary value={parseFontLibrary(values.social_font_library)} onChange={(fonts) => set('social_font_library', JSON.stringify(fonts))} />}
+          <div className="mt-5 flex justify-end"><Button isLoading={busy === 'save'} onClick={() => saveTab('social')}><Save className="h-4 w-4" /> ذخیره</Button></div>
+        </Card>}
+
+        {activeTab === 'news' && <Card className="p-5 sm:p-6">
           <div className="flex items-start gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-700"><Clock3 className="h-5 w-5" /></span><div><h2 className="text-lg font-bold text-slate-900">پایش و پردازش خبر</h2><p className="mt-1 text-sm text-slate-500">فقط فیدهای فعال با کاربرد «اتاق خبر» در این چرخه قرار می‌گیرند.</p></div></div>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
+          {subTab === 'schedule' && <div className="mt-6 grid gap-4 md:grid-cols-2">
             <Field label="فاصله پایش (دقیقه)" hint="مقدار معتبر بین ۵ تا ۱۴۴۰ دقیقه است."><input type="number" min="5" max="1440" inputMode="numeric" dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.news_poll_interval_minutes || '240'} onChange={(e) => set('news_poll_interval_minutes', e.target.value)} /></Field>
             <Field label="حداکثر قدمت خبر (روز)" hint="خبرهای قدیمی‌تر هنگام دریافت نادیده گرفته می‌شوند."><input type="number" min="1" max="90" inputMode="numeric" dir="ltr" className="rounded-xl border px-3 py-2.5" value={values.news_max_age_days || '10'} onChange={(e) => set('news_max_age_days', e.target.value)} /></Field>
-          </div>
-          <div className="mt-5 grid gap-5">
+          </div>}
+          {subTab === 'prompts' && <div className="mt-5 grid gap-5">
             <Field label="پرامپت ترجمه و خلاصه‌سازی داشبورد" hint="برای تولید تیتر فارسی و خلاصهٔ ۲ تا ۴ جمله‌ای استفاده می‌شود."><textarea className="min-h-36 rounded-xl border px-3 py-3 leading-7" placeholder="لحن، دقت، واژگان و قواعد خلاصه‌سازی خبر را مشخص کنید..." value={values.news_summary_prompt || ''} onChange={(e) => set('news_summary_prompt', e.target.value)} /></Field>
             <Field label="پرامپت ترجمهٔ متن کامل" hint="هنگام انتخاب «انتشار در سایت»، تمام متن منبع با این دستور ترجمه می‌شود."><textarea className="min-h-36 rounded-xl border px-3 py-3 leading-7" placeholder="قواعد ترجمهٔ کامل، دقیق و بدون حذف جزئیات را مشخص کنید..." value={values.news_full_translation_prompt || ''} onChange={(e) => set('news_full_translation_prompt', e.target.value)} /></Field>
-          </div>
-        </Card>
+          </div>}
+          <div className="mt-5 flex justify-end"><Button isLoading={busy === 'save'} onClick={() => saveTab('news')}><Save className="h-4 w-4" /> ذخیره</Button></div>
+        </Card>}
 
-        <Card className="p-5 sm:p-6">
+        {activeTab === 'news' && subTab === 'wordpress' && <Card className="p-5 sm:p-6">
           <div className="flex items-start gap-3"><span className="grid h-10 w-10 place-items-center rounded-xl bg-sky-50 text-sky-700"><Globe2 className="h-5 w-5" /></span><div><h2 className="text-lg font-bold text-slate-900">انتشار در WordPress</h2><p className="mt-1 text-sm text-slate-500">برای امنیت، از Application Password وردپرس استفاده کنید؛ نه رمز اصلی حساب.</p></div></div>
           <div className="mt-6 grid gap-4 md:grid-cols-2">
             <Field label="آدرس سایت WordPress"><input dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="https://example.com" value={values.wp_site_url || ''} onChange={(e) => set('wp_site_url', e.target.value)} /></Field>
@@ -90,10 +339,8 @@ export default function PublishingSettingsPage() {
             <Field label="وضعیت مطلب در WordPress"><select className="rounded-xl border px-3 py-2.5" value={values.wp_post_status || 'publish'} onChange={(e) => set('wp_post_status', e.target.value)}><option value="publish">انتشار فوری</option><option value="draft">ذخیره به‌صورت پیش‌نویس</option><option value="pending">در انتظار بازبینی</option></select></Field>
             <Field label="شناسه دسته‌بندی WordPress" hint="اختیاری؛ فقط شناسه عددی دسته را وارد کنید."><input type="text" inputMode="numeric" dir="ltr" className="rounded-xl border px-3 py-2.5" placeholder="12" value={values.wp_category_id || ''} onChange={(e) => set('wp_category_id', e.target.value.replace(/\D/g, ''))} /></Field>
           </div>
-          <Button className="mt-5" variant="outline" isLoading={busy === 'wordpress'} onClick={() => run('wordpress', () => apiFetch('/publishing/settings/test-wordpress', { method: 'POST', body: editableSettings(values) }), 'اتصال WordPress و دسترسی انتشار تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال WordPress</Button>
-        </Card>
-
-        <div className="flex justify-end"><Button size="lg" isLoading={busy === 'save'} onClick={save}><Save className="h-4 w-4" /> ذخیره همه تنظیمات</Button></div>
+          <div className="mt-5 flex flex-wrap gap-2"><Button variant="outline" isLoading={busy === 'wordpress'} onClick={() => run('wordpress', () => apiFetch('/publishing/settings/test-wordpress', { method: 'POST', body: editableSettings(Object.fromEntries(tabKeys.wordpress.map((key) => [key, values[key] ?? '']))) }), 'اتصال WordPress و دسترسی انتشار تأیید شد.')}><TestTube2 className="h-4 w-4" /> تست اتصال WordPress</Button><Button isLoading={busy === 'save'} onClick={() => saveTab('wordpress')}><Save className="h-4 w-4" /> ذخیره</Button></div>
+        </Card>}
       </main>
     </ProtectedLayout>
   );

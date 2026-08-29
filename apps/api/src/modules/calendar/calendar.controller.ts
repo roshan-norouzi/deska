@@ -93,10 +93,11 @@ export class CalendarController {
   @Patch(':id/attendees/:attendeeId')
   @RequirePermission('calendar.manage')
   updateAttendee(
+    @TenantCtx() tenant: TenantContext,
     @Param('id') _eventId: string,
     @Param('attendeeId') attendeeId: string,
     @Body('status') status: string,
   ) {
-    return this.calendarService.updateAttendeeStatus(_eventId, attendeeId, status);
+    return this.calendarService.updateAttendeeStatus(tenant.tenantId, _eventId, attendeeId, status);
   }
 }

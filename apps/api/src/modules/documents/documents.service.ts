@@ -7,6 +7,7 @@ import {
 } from '@deska/shared';
 import * as fs from 'fs';
 import * as path from 'path';
+import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 
 @Injectable()
@@ -17,7 +18,7 @@ export class DocumentsService {
     private prisma: PrismaService,
     config: ConfigService,
   ) {
-    this.storagePath = config.get<string>('STORAGE_PATH', './storage');
+    this.storagePath = path.resolve(config.get<string>('STORAGE_PATH', './storage'));
     if (!fs.existsSync(this.storagePath)) {
       fs.mkdirSync(this.storagePath, { recursive: true });
     }
@@ -238,27 +239,36 @@ export class DocumentsService {
     if (!fs.existsSync(tenantDir)) fs.mkdirSync(tenantDir, { recursive: true });
 
     const safeOriginalName = path.basename(file.originalname).replace(/[<>:"/\\|?*\x00-\x1F]/g, '_');
-    const filename = `${Date.now()}-${safeOriginalName}`;
+    const extension = path.extname(safeOriginalName).slice(0, 20);
+    const filename = `${randomUUID()}${extension}`;
     const destPath = path.resolve(path.join(tenantDir, filename));
-    fs.writeFileSync(destPath, file.buffer);
+    if (!this.isPathWithin(destPath, tenantDir)) {
+      throw new BadRequestException('مسیر ذخیره‌سازی فایل معتبر نیست');
+    }
+    fs.writeFileSync(destPath, file.buffer, { flag: 'wx' });
 
     const originalName = this.resolveDisplayName(file.originalname, meta.displayName);
     const folderId = await this.resolveFolderIdForUpload(tenantId, meta);
 
-    return this.prisma.documentFile.create({
-      data: {
-        tenantId,
-        name: filename,
-        originalName,
-        mimeType: file.mimetype,
-        size: file.size,
-        path: destPath,
-        folderId,
-        entityType: meta.entityType,
-        entityId: meta.entityId,
-        uploadedById: meta.uploadedById,
-      },
-    });
+    try {
+      return await this.prisma.documentFile.create({
+        data: {
+          tenantId,
+          name: filename,
+          originalName,
+          mimeType: file.mimetype,
+          size: file.size,
+          path: destPath,
+          folderId,
+          entityType: meta.entityType,
+          entityId: meta.entityId,
+          uploadedById: meta.uploadedById,
+        },
+      });
+    } catch (error) {
+      fs.rmSync(destPath, { force: true });
+      throw error;
+    }
   }
 
   private resolveDisplayName(fileOriginalName: string, displayName?: string): string {
@@ -315,28 +325,38 @@ export class DocumentsService {
 
   async removeFile(tenantId: string, id: string) {
     const file = await this.findFile(tenantId, id);
-    const diskPath = this.resolveDiskPath(file);
-    if (fs.existsSync(diskPath)) {
-      fs.unlinkSync(diskPath);
+    let diskPath: string | null = null;
+    try {
+      diskPath = this.resolveDiskPath(file);
+    } catch (error) {
+      if (!(error instanceof NotFoundException)) throw error;
     }
-    return this.prisma.documentFile.delete({ where: { id } });
+    const deleted = await this.prisma.documentFile.delete({ where: { id } });
+    if (diskPath) fs.rmSync(diskPath, { force: true });
+    return deleted;
   }
 
   resolveDiskPath(file: { path: string; tenantId: string; name: string }): string {
+    const tenantDir = path.resolve(this.storagePath, file.tenantId);
     const candidates = [
       file.path,
       path.resolve(file.path),
-      path.join(this.storagePath, file.tenantId, file.name),
+      path.join(tenantDir, file.name),
       path.join(process.cwd(), file.path),
       path.join(process.cwd(), 'apps', 'api', file.path),
       path.join(process.cwd(), 'uploads', file.tenantId, file.name),
-    ];
+    ].map((candidate) => path.resolve(candidate));
 
     for (const candidate of candidates) {
-      if (fs.existsSync(candidate)) return candidate;
+      if (this.isPathWithin(candidate, tenantDir) && fs.existsSync(candidate)) return candidate;
     }
 
-    return path.resolve(file.path);
+    throw new NotFoundException('فایل فیزیکی در فضای ذخیره‌سازی سازمان یافت نشد');
+  }
+
+  private isPathWithin(candidate: string, directory: string): boolean {
+    const relative = path.relative(path.resolve(directory), path.resolve(candidate));
+    return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
   }
 
   getFilePath(tenantId: string, id: string) {

@@ -26,18 +26,8 @@ function runtimeBasePath(): string {
   if (configured) return configured;
   if (typeof window === 'undefined') return '';
   const first = window.location.pathname.split('/').filter(Boolean)[0] ?? '';
-  const appRoutes = new Set(['login', 'dashboard', 'calendar', 'contacts', 'documents', 'hr', 'projects', 'publishing', 'settings', 'users', 'admin', 'platform']);
+  const appRoutes = new Set(['login', 'register', 'invitations', 'organizations', 'dashboard', 'calendar', 'contacts', 'documents', 'employees', 'projects', 'publishing', 'settings', 'users', 'admin', 'platform']);
   return first && !appRoutes.has(first) ? `/${first}` : '';
-}
-
-export function getAccessToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(TOKEN_KEY);
-}
-
-export function getRefreshToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem(REFRESH_KEY);
 }
 
 export function getTenantId(): string | null {
@@ -45,12 +35,9 @@ export function getTenantId(): string | null {
   return localStorage.getItem(TENANT_KEY);
 }
 
-export function setTokens(accessToken: string, refreshToken: string) {
-  localStorage.setItem(TOKEN_KEY, accessToken);
-  localStorage.setItem(REFRESH_KEY, refreshToken);
-}
-
+/** Remove credentials written by releases that predate HttpOnly-cookie sessions. */
 export function clearTokens() {
+  if (typeof window === 'undefined') return;
   localStorage.removeItem(TOKEN_KEY);
   localStorage.removeItem(REFRESH_KEY);
 }
@@ -66,14 +53,12 @@ export function clearTenantId() {
 let refreshPromise: Promise<boolean> | null = null;
 
 async function refreshAccessToken(): Promise<boolean> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) return false;
-
   try {
     const res = await fetch(withBasePath('/api/auth/refresh'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      credentials: 'include',
+      body: '{}',
     });
 
     if (!res.ok) {
@@ -81,8 +66,6 @@ async function refreshAccessToken(): Promise<boolean> {
       return false;
     }
 
-    const data = await res.json();
-    setTokens(data.accessToken, data.refreshToken);
     return true;
   } catch {
     clearTokens();
@@ -121,11 +104,6 @@ export async function apiFetch<T = unknown>(
     headers['Content-Type'] = 'application/json';
   }
 
-  if (!skipAuth) {
-    const token = getAccessToken();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-  }
-
   if (!skipTenant) {
     const tenantId = getTenantId();
     if (tenantId) headers['X-Tenant-Id'] = tenantId;
@@ -137,6 +115,7 @@ export async function apiFetch<T = unknown>(
   try {
     response = await fetch(url, {
       ...rest,
+      credentials: rest.credentials ?? 'include',
       headers,
       body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
     });
@@ -153,11 +132,9 @@ export async function apiFetch<T = unknown>(
 
     const refreshed = await refreshPromise;
     if (refreshed) {
-      const token = getAccessToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
-
       response = await fetch(url, {
         ...rest,
+        credentials: rest.credentials ?? 'include',
         headers,
         body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
       });
@@ -214,11 +191,6 @@ export async function apiFetchBlob(path: string, options: ApiFetchOptions = {}):
     ...(customHeaders as Record<string, string>),
   };
 
-  if (!skipAuth) {
-    const token = getAccessToken();
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-  }
-
   if (!skipTenant) {
     const tenantId = getTenantId();
     if (tenantId) headers['X-Tenant-Id'] = tenantId;
@@ -228,6 +200,7 @@ export async function apiFetchBlob(path: string, options: ApiFetchOptions = {}):
 
   const response = await fetch(url, {
     ...rest,
+    credentials: rest.credentials ?? 'include',
     headers,
     body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
   });
@@ -240,10 +213,9 @@ export async function apiFetchBlob(path: string, options: ApiFetchOptions = {}):
     }
     const refreshed = await refreshPromise;
     if (refreshed) {
-      const token = getAccessToken();
-      if (token) headers['Authorization'] = `Bearer ${token}`;
       const retry = await fetch(url, {
         ...rest,
+        credentials: rest.credentials ?? 'include',
         headers,
         body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
       });

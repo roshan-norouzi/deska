@@ -1,4 +1,4 @@
-import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MinLength } from 'class-validator';
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
 import { ORGANIZATIONAL_ROLES } from '@deska/shared';
 import { EmployeeProfileFieldsDto } from './employee-profile-fields.dto';
 
@@ -12,7 +12,8 @@ export class InviteMemberDto extends EmployeeProfileFieldsDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(8, { message: 'رمز عبور باید حداقل ۸ کاراکتر باشد' })
+  @MinLength(12, { message: 'رمز عبور باید حداقل ۱۲ کاراکتر باشد' })
+  @MaxLength(128)
   password?: string;
 
   @IsOptional()

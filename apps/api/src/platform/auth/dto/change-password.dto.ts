@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, MinLength } from 'class-validator';
+import { IsNotEmpty, IsString, MaxLength, MinLength } from 'class-validator';
 
 export class ChangePasswordDto {
   @IsString()
@@ -6,6 +6,7 @@ export class ChangePasswordDto {
   currentPassword!: string;
 
   @IsString()
-  @MinLength(8, { message: 'رمز عبور جدید باید حداقل ۸ کاراکتر باشد' })
+  @MinLength(12, { message: 'رمز عبور جدید باید حداقل ۱۲ کاراکتر باشد' })
+  @MaxLength(128, { message: 'رمز عبور جدید حداکثر ۱۲۸ کاراکتر است' })
   newPassword!: string;
 }

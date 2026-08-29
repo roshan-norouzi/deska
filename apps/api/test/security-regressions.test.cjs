@@ -1,0 +1,490 @@
+require('reflect-metadata');
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { ForbiddenException, NotFoundException, UnauthorizedException } = require('@nestjs/common');
+const { TenantGuard } = require('../dist/common/guards/tenant.guard');
+const { TenantController } = require('../dist/platform/tenant/tenant.controller');
+const { CalendarService } = require('../dist/modules/calendar/calendar.service');
+const { PublishingSettingsService } = require('../dist/modules/smart-publishing/publishing-settings.service');
+const { AuthService } = require('../dist/platform/auth/auth.service');
+const { JwtStrategy } = require('../dist/common/strategies/jwt.strategy');
+const { NotificationService } = require('../dist/common/services/audit.service');
+const { getDefaultPermissionsForTenantRole } = require('@deska/shared');
+
+test('TenantGuard resolves permissions only inside the active tenant', async () => {
+  let roleLookup;
+  const prisma = {
+    tenantMember: {
+      findUnique: async () => ({ role: 'member', tenant: { isActive: true } }),
+    },
+    roleDefinition: {
+      findFirst: async (query) => {
+        roleLookup = query;
+        return { permissions: [{ permission: 'contacts.view' }] };
+      },
+    },
+  };
+  const config = { get: (_key, fallback) => fallback };
+  const request = {
+    headers: { 'x-tenant-id': 'tenant-a' },
+    user: { id: 'user-a', role: 'user', permissions: ['*'] },
+  };
+  const context = { switchToHttp: () => ({ getRequest: () => request }) };
+
+  const result = await new TenantGuard(prisma, config).canActivate(context);
+
+  assert.equal(result, true);
+  assert.equal(roleLookup.where.tenantId, 'tenant-a');
+  assert.deepEqual(request.user.permissions, ['contacts.view']);
+  assert.deepEqual(request.tenant, { tenantId: 'tenant-a', memberRole: 'member' });
+});
+
+test('TenantGuard rejects membership in an inactive tenant', async () => {
+  const prisma = {
+    tenantMember: {
+      findUnique: async () => ({ role: 'member', tenant: { isActive: false } }),
+    },
+  };
+  const config = { get: (_key, fallback) => fallback };
+  const request = {
+    headers: { 'x-tenant-id': 'tenant-a' },
+    user: { id: 'user-a', role: 'user', permissions: [] },
+  };
+  const context = { switchToHttp: () => ({ getRequest: () => request }) };
+
+  await assert.rejects(
+    () => new TenantGuard(prisma, config).canActivate(context),
+    ForbiddenException,
+  );
+});
+
+test('TenantGuard does not allow a super-admin to invent a tenant id', async () => {
+  const prisma = {
+    tenant: { findUnique: async () => null },
+  };
+  const config = { get: (_key, fallback) => fallback };
+  const request = {
+    headers: { 'x-tenant-id': 'non-existent-tenant' },
+    user: { id: 'admin-a', role: 'super_admin', permissions: ['*'] },
+  };
+  const context = { switchToHttp: () => ({ getRequest: () => request }) };
+
+  await assert.rejects(
+    () => new TenantGuard(prisma, config).canActivate(context),
+    /سازمان یافت نشد/,
+  );
+  assert.equal(request.tenant, undefined);
+});
+
+test('tenant route id cannot differ from the active tenant header', () => {
+  const service = { update: () => assert.fail('service must not be called') };
+  const controller = new TenantController(service);
+
+  assert.throws(
+    () => controller.update('tenant-b', {}, { tenantId: 'tenant-a', memberRole: 'owner' }),
+    ForbiddenException,
+  );
+});
+
+test('calendar attendee updates are scoped to both event and tenant', async () => {
+  let attendeeLookup;
+  const prisma = {
+    calendarEventAttendee: {
+      findFirst: async (query) => {
+        attendeeLookup = query;
+        return null;
+      },
+      update: () => assert.fail('update must not run for a foreign attendee'),
+    },
+  };
+  const service = new CalendarService(prisma);
+
+  await assert.rejects(
+    () => service.updateAttendeeStatus('tenant-a', 'event-a', 'attendee-b', 'accepted'),
+    NotFoundException,
+  );
+  assert.deepEqual(attendeeLookup.where, {
+    id: 'attendee-b',
+    eventId: 'event-a',
+    event: { tenantId: 'tenant-a' },
+  });
+});
+
+test('stored integration secrets are not reused for a caller-controlled host', () => {
+  const service = new PublishingSettingsService({}, {});
+  const current = {
+    gapgpt_base_url: 'https://trusted-gap.example',
+    gapgpt_api_key: 'stored-gap-secret',
+    wp_site_url: 'https://trusted-wp.example',
+    wp_app_password: 'stored-wp-secret',
+  };
+
+  const gapChanged = service.mergeForTest(current, {
+    gapgpt_base_url: 'https://attacker.example',
+  });
+  const wpChanged = service.mergeForTest(current, {
+    wp_site_url: 'https://attacker.example',
+  });
+
+  assert.equal(gapChanged.gapgpt_api_key, '');
+  assert.equal(wpChanged.wp_app_password, '');
+});
+
+test('legacy GapGPT credentials remain usable when the module row has an empty placeholder', async () => {
+  const prisma = {
+    tenant: {
+      findUnique: async () => ({ settings: {
+        gapgpt_base_url: 'https://legacy-gap.example',
+        gapgpt_api_key: 'legacy-gap-secret',
+      } }),
+    },
+    tenantModule: {
+      findUnique: async () => ({ settings: {
+        gapgpt_base_url: 'https://legacy-gap.example',
+        gapgpt_api_key: '',
+      } }),
+    },
+  };
+  const service = new PublishingSettingsService(prisma, {
+    encrypt: (value) => value,
+    decrypt: (value) => value,
+  });
+
+  const settings = await service.getRaw('tenant-a');
+
+  assert.equal(settings.gapgpt_base_url, 'https://legacy-gap.example');
+  assert.equal(settings.gapgpt_api_key, 'legacy-gap-secret');
+});
+
+test('saving a new integration host removes an omitted stored secret', async () => {
+  let writtenSettings;
+  const prisma = {
+    tenant: {
+      findUnique: async () => ({ settings: {} }),
+      update: async () => ({}),
+    },
+    tenantModule: {
+      findUnique: async () => ({
+        settings: {
+          gapgpt_base_url: 'https://trusted-gap.example',
+          gapgpt_api_key: 'encrypted-stored-secret',
+        },
+      }),
+      update: async ({ data }) => {
+        writtenSettings = data.settings;
+        return {};
+      },
+    },
+    $transaction: async (operations) => Promise.all(operations),
+  };
+  const secrets = {
+    encrypt: (value) => `encrypted:${value}`,
+    decrypt: (value) => String(value).replace(/^encrypted:/, ''),
+  };
+  const service = new PublishingSettingsService(prisma, secrets);
+  service.getRaw = async () => ({
+    gapgpt_base_url: 'https://trusted-gap.example',
+    gapgpt_api_key: 'stored-secret',
+  });
+  service.getPublic = async () => ({});
+
+  await service.save('tenant-a', { gapgpt_base_url: 'https://new-gap.example' });
+
+  assert.equal(writtenSettings.gapgpt_base_url, 'https://new-gap.example');
+  assert.equal(Object.hasOwn(writtenSettings, 'gapgpt_api_key'), false);
+});
+
+test('the built-in manager role excludes platform-administration permissions', () => {
+  const permissions = getDefaultPermissionsForTenantRole('manager');
+
+  assert.equal(permissions.includes('roles.manage'), false);
+  assert.equal(permissions.includes('modules.manage'), false);
+  assert.equal(permissions.includes('platform.admin'), false);
+});
+
+test('refresh tokens are stored as SHA-256 hashes', async () => {
+  let storedToken;
+  const prisma = {
+    refreshToken: {
+      create: async ({ data }) => {
+        storedToken = data.token;
+        return data;
+      },
+    },
+  };
+  const jwtService = { sign: () => 'signed-access-token' };
+  const config = {
+    get: (key, fallback) => (
+      key === 'JWT_ACCESS_EXPIRES' ? '15m'
+        : key === 'JWT_REFRESH_EXPIRES' ? '7d'
+          : fallback
+    ),
+  };
+  const service = new AuthService(prisma, jwtService, config);
+
+  const result = await service.issueTokens('user-a', 'user@example.com', 'user');
+
+  assert.match(storedToken, /^[a-f0-9]{64}$/);
+  assert.notEqual(storedToken, result.refreshToken);
+  assert.equal(result.refreshToken.length, 36);
+});
+
+test('parallel failed logins increment atomically and lock the account', async () => {
+  const state = { failedLoginAttempts: 0, lockedUntil: null };
+  const user = {
+    id: 'user-a',
+    email: 'user@example.com',
+    name: 'User',
+    role: 'user',
+    avatarUrl: null,
+    passwordHash: await require('bcrypt').hash('correct-password', 4),
+    isActive: true,
+    status: 'active',
+    failedLoginAttempts: 0,
+    lockedUntil: null,
+  };
+  const transactionCalls = [];
+  const tx = {
+    user: {
+      update: async (query) => {
+        if (query.data.failedLoginAttempts?.increment === 1) {
+          state.failedLoginAttempts += 1;
+          return { failedLoginAttempts: state.failedLoginAttempts };
+        }
+        if (query.data.lockedUntil) {
+          state.lockedUntil = query.data.lockedUntil;
+          return { failedLoginAttempts: state.failedLoginAttempts };
+        }
+        assert.fail('unexpected user update inside failed-login transaction');
+      },
+    },
+  };
+  const prisma = {
+    user: {
+      findUnique: async () => ({ ...user, failedLoginAttempts: state.failedLoginAttempts }),
+      update: () => assert.fail('failed attempts must not use a non-transactional update'),
+    },
+    $transaction: async (callback) => {
+      transactionCalls.push(callback);
+      return callback(tx);
+    },
+  };
+  const service = new AuthService(prisma, {}, {});
+
+  const attempts = await Promise.allSettled(
+    Array.from({ length: 5 }, () => service.login({
+      email: user.email,
+      password: 'wrong-password',
+    })),
+  );
+
+  assert.equal(attempts.every((attempt) => attempt.status === 'rejected'), true);
+  assert.equal(transactionCalls.length, 5);
+  assert.equal(state.failedLoginAttempts, 5);
+  assert.equal(state.lockedUntil instanceof Date, true);
+  assert.ok(state.lockedUntil.getTime() > Date.now());
+});
+
+test('a password-reset token can be consumed by only one concurrent request', async () => {
+  const tokenState = { usedAt: null };
+  let lookupCount = 0;
+  let releaseLookups;
+  const bothLookupsStarted = new Promise((resolve) => { releaseLookups = resolve; });
+  const record = {
+    id: 'reset-a',
+    userId: 'user-a',
+    usedAt: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    user: { isActive: true },
+  };
+  const tx = {
+    passwordResetToken: {
+      updateMany: async ({ where, data }) => {
+        assert.equal(where.id, record.id);
+        assert.equal(where.usedAt, null);
+        if (tokenState.usedAt !== null || record.expiresAt < where.expiresAt.gte) {
+          return { count: 0 };
+        }
+        tokenState.usedAt = data.usedAt;
+        return { count: 1 };
+      },
+    },
+    user: {
+      updateMany: async ({ where }) => {
+        assert.deepEqual(where, { id: record.userId, isActive: true });
+        return { count: 1 };
+      },
+    },
+    refreshToken: { deleteMany: async () => ({ count: 0 }) },
+  };
+  const prisma = {
+    passwordResetToken: {
+      findUnique: async () => {
+        lookupCount += 1;
+        if (lookupCount === 2) releaseLookups();
+        await bothLookupsStarted;
+        return { ...record };
+      },
+    },
+    $transaction: async (callback) => callback(tx),
+  };
+  const service = new AuthService(prisma, {}, {});
+  const dto = {
+    token: 'single-use-token',
+    password: 'New-secure-password-123!',
+    confirmPassword: 'New-secure-password-123!',
+  };
+
+  const results = await Promise.allSettled([
+    service.resetPassword(dto),
+    service.resetPassword(dto),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  const rejected = results.find((result) => result.status === 'rejected');
+  assert.ok(rejected);
+  assert.equal(rejected.reason.message, 'توکن بازیابی نامعتبر یا منقضی شده است');
+  assert.equal(tokenState.usedAt instanceof Date, true);
+});
+
+test('a refresh token can be rotated by only one concurrent request', async () => {
+  let consumed = false;
+  const created = [];
+  const stored = {
+    id: 'refresh-a',
+    expiresAt: new Date(Date.now() + 60_000),
+    user: {
+      id: 'user-a',
+      email: 'user@example.com',
+      name: 'User',
+      role: 'user',
+      avatarUrl: null,
+      isActive: true,
+      status: 'active',
+    },
+  };
+  const tx = {
+    user: {
+      findFirst: async () => ({ id: stored.user.id }),
+    },
+    refreshToken: {
+      deleteMany: async () => {
+        if (consumed) return { count: 0 };
+        consumed = true;
+        return { count: 1 };
+      },
+      create: async ({ data }) => {
+        created.push(data);
+        return data;
+      },
+    },
+  };
+  const prisma = {
+    refreshToken: {
+      findUnique: async () => stored,
+    },
+    $transaction: async (callback) => callback(tx),
+  };
+  let accessCounter = 0;
+  const jwtService = { sign: () => `access-${++accessCounter}` };
+  const config = { get: (key, fallback) => key === 'JWT_REFRESH_EXPIRES' ? '7d' : fallback };
+  const service = new AuthService(prisma, jwtService, config);
+
+  const results = await Promise.allSettled([
+    service.refresh({ refreshToken: 'single-use-refresh' }),
+    service.refresh({ refreshToken: 'single-use-refresh' }),
+  ]);
+
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  const rejected = results.find((result) => result.status === 'rejected');
+  assert.ok(rejected?.reason instanceof UnauthorizedException);
+  assert.equal(created.length, 1);
+});
+
+test('JWTs issued before a password change are rejected immediately', async () => {
+  const changedAt = new Date('2026-08-30T00:00:10.500Z');
+  const prisma = {
+    user: {
+      findUnique: async () => ({
+        id: 'user-a',
+        email: 'user@example.com',
+        role: 'user',
+        status: 'active',
+        isActive: true,
+        passwordChangedAt: changedAt,
+      }),
+    },
+  };
+  const strategy = new JwtStrategy({ get: () => 'a-secure-test-secret-that-is-long-enough' }, prisma);
+
+  const stale = await strategy.validate({
+    sub: 'user-a',
+    email: 'user@example.com',
+    role: 'user',
+    iat: Math.floor(changedAt.getTime() / 1000) - 1,
+  });
+  const current = await strategy.validate({
+    sub: 'user-a',
+    email: 'user@example.com',
+    role: 'user',
+    iat: Math.floor(changedAt.getTime() / 1000),
+  });
+
+  assert.equal(stale, null);
+  assert.equal(current.id, 'user-a');
+});
+
+test('logout-all invalidates existing access tokens as well as refresh tokens', async () => {
+  const invalidatedAt = new Date('2026-08-30T00:01:10.500Z');
+  const prisma = {
+    user: {
+      findUnique: async () => ({
+        id: 'user-a',
+        email: 'user@example.com',
+        role: 'user',
+        status: 'active',
+        isActive: true,
+        passwordChangedAt: null,
+        sessionsInvalidatedAt: invalidatedAt,
+      }),
+    },
+  };
+  const strategy = new JwtStrategy({ get: () => 'a-secure-test-secret-that-is-long-enough' }, prisma);
+
+  const result = await strategy.validate({
+    sub: 'user-a',
+    email: 'user@example.com',
+    role: 'user',
+    iat: Math.floor(invalidatedAt.getTime() / 1000) - 1,
+  });
+
+  assert.equal(result, null);
+});
+
+test('notifications are always listed and updated inside the active tenant', async () => {
+  const calls = {};
+  const prisma = {
+    notification: {
+      findMany: async (query) => {
+        calls.list = query;
+        return [];
+      },
+      updateMany: async (query) => {
+        calls.update = query;
+        return { count: 0 };
+      },
+    },
+  };
+  const service = new NotificationService(prisma);
+
+  await service.list('tenant-a', 'user-a', true);
+  await service.markRead('tenant-a', 'notification-b', 'user-a');
+
+  assert.deepEqual(calls.list.where, { tenantId: 'tenant-a', userId: 'user-a', isRead: false });
+  assert.deepEqual(calls.update.where, {
+    id: 'notification-b',
+    tenantId: 'tenant-a',
+    userId: 'user-a',
+  });
+});

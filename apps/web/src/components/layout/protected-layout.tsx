@@ -5,16 +5,25 @@ import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
 import { useTenant } from '@/lib/tenant-context';
 import { AppShell } from './app-shell';
+import { PlatformNavigation } from './navigation';
 
 interface ProtectedLayoutProps {
   children: ReactNode;
   title?: string;
   superAdminOnly?: boolean;
+  platformAdminOnly?: boolean;
+  tenantRequired?: boolean;
 }
 
-export function ProtectedLayout({ children, title, superAdminOnly }: ProtectedLayoutProps) {
+export function ProtectedLayout({
+  children,
+  title,
+  superAdminOnly = false,
+  platformAdminOnly = false,
+  tenantRequired = true,
+}: ProtectedLayoutProps) {
   const router = useRouter();
-  const { isAuthenticated, isLoading: authLoading, isSuperAdmin } = useAuth();
+  const { isAuthenticated, isLoading: authLoading, isSuperAdmin, isPlatformAdmin } = useAuth();
   const { activeTenantId, isLoading: tenantLoading } = useTenant();
   const [ready, setReady] = useState(false);
 
@@ -26,18 +35,18 @@ export function ProtectedLayout({ children, title, superAdminOnly }: ProtectedLa
       return;
     }
 
-    if (superAdminOnly && !isSuperAdmin) {
-      router.replace('/dashboard');
+    if ((superAdminOnly && !isSuperAdmin) || (platformAdminOnly && !isPlatformAdmin)) {
+      router.replace(activeTenantId ? '/dashboard' : '/organizations');
       return;
     }
 
-    if (!superAdminOnly && !activeTenantId) {
-      router.replace('/settings');
+    if (tenantRequired && !activeTenantId) {
+      router.replace('/organizations');
       return;
     }
 
     setReady(true);
-  }, [authLoading, tenantLoading, isAuthenticated, isSuperAdmin, activeTenantId, superAdminOnly, router]);
+  }, [authLoading, tenantLoading, isAuthenticated, isSuperAdmin, isPlatformAdmin, activeTenantId, superAdminOnly, platformAdminOnly, tenantRequired, router]);
 
   if (authLoading || tenantLoading || !ready) {
     return (
@@ -50,5 +59,10 @@ export function ProtectedLayout({ children, title, superAdminOnly }: ProtectedLa
     );
   }
 
-  return <AppShell title={title}>{children}</AppShell>;
+  return (
+    <AppShell title={title}>
+      <PlatformNavigation />
+      {children}
+    </AppShell>
+  );
 }

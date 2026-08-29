@@ -20,9 +20,9 @@
 - Studio (فیلدهای سفارشی)
 - مخاطبین، اسناد و تقویم
 
-### ماژول‌های فعال
-- **هسته:** مخاطبین، اسناد و تقویم
-- **منابع انسانی:** کارمندان، دپارتمان‌ها و استخدام
+### قابلیت‌های اصلی
+- **هستهٔ همیشه‌فعال:** مخاطبین، اسناد، تقویم و کارمندان/دپارتمان‌ها
+- **ماژول‌های اختیاری:** پروژه‌ها، تسک‌ها و نشر هوشمند (بر اساس پلن و تنظیم سازمان)
 
 ## راه‌اندازی سریع
 
@@ -39,7 +39,7 @@
 # Clone و نصب
 pnpm install
 
-# کپی env
+# کپی env و جایگزینی همهٔ مقادیر replace-with-...
 cp .env.example .env
 
 # یا دستی:
@@ -57,7 +57,7 @@ pnpm dev
 
 - **Web:** http://localhost:3000
 - **API:** http://localhost:3001/api
-- **Admin:** admin@deska.local / Admin@1234
+- **ورود مدیر:** از `SEED_ADMIN_EMAIL` و `SEED_ADMIN_PASSWORD` تنظیم‌شده در فایل محلی `.env` استفاده کنید. رمز پیش‌فرض عمومی وجود ندارد.
 
 ### Docker (Production)
 
@@ -73,8 +73,7 @@ DESKA ERP/
 │   ├── api/          # NestJS REST API
 │   └── web/          # Next.js RTL UI
 ├── packages/
-│   ├── shared/       # Enums, permissions, labels
-│   └── module-sdk/   # Module development SDK
+│   └── shared/       # Enums, permissions, labels
 ├── docker-compose.yml
 └── pnpm-workspace.yaml
 ```
@@ -93,9 +92,10 @@ DEFAULT_TENANT_SLUG=default
 2. **Run.bat** را اجرا کنید
 3. API روی http://localhost:3001/api/health باید `{"status":"ok"}` برگرداند
 
-### اطلاعات ورود پیش‌فرض
-- **Admin:** admin@deska.local / Admin@1234
-- **Demo:** ali@deska.demo / Demo@1404
+### اطلاعات ورود
+- ایمیل و رمز مدیر اولیه در `SEED_ADMIN_EMAIL` و `SEED_ADMIN_PASSWORD` تعیین می‌شود.
+- رمز اولیه باید حداقل ۱۲ نویسه، منحصربه‌فرد و فقط برای راه‌اندازی نخست باشد؛ آن را در Git ثبت نکنید.
+- برای کنترل کامل پس از اجرا: `pnpm verify:live`
 
 ## License
 

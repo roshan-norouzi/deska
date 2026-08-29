@@ -16,7 +16,13 @@ import { JwtAuthGuard } from '../../common/guards/jwt-auth.guard';
 import { ModuleEnabledGuard } from '../../common/guards/module-enabled.guard';
 import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
-import { ContactsService, ContactQuery } from './contacts.service';
+import { ContactsService } from './contacts.service';
+import {
+  ContactPayloadDto,
+  ContactQueryDto,
+  CreateBankAccountDto,
+  UpdateBankAccountDto,
+} from './dto/contact.dto';
 
 @Controller('contacts')
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard, ModuleEnabledGuard)
@@ -26,7 +32,7 @@ export class ContactsController {
 
   @Get()
   @RequirePermission('contacts.view')
-  findAll(@TenantCtx() tenant: TenantContext, @Query() query: ContactQuery) {
+  findAll(@TenantCtx() tenant: TenantContext, @Query() query: ContactQueryDto) {
     return this.contactsService.findAll(tenant.tenantId, query);
   }
 
@@ -42,13 +48,7 @@ export class ContactsController {
     @TenantCtx() tenant: TenantContext,
     @Param('id') id: string,
     @Body()
-    body: {
-      bankName: string;
-      accountNumber?: string;
-      cardNumber?: string;
-      sheba?: string;
-      isDefault?: boolean;
-    },
+    body: CreateBankAccountDto,
   ) {
     return this.contactsService.createBankAccount(tenant.tenantId, id, body);
   }
@@ -60,13 +60,7 @@ export class ContactsController {
     @Param('id') id: string,
     @Param('accountId') accountId: string,
     @Body()
-    body: {
-      bankName?: string;
-      accountNumber?: string;
-      cardNumber?: string;
-      sheba?: string;
-      isDefault?: boolean;
-    },
+    body: UpdateBankAccountDto,
   ) {
     return this.contactsService.updateBankAccount(tenant.tenantId, id, accountId, body);
   }
@@ -92,9 +86,9 @@ export class ContactsController {
   create(
     @TenantCtx() tenant: TenantContext,
     @User() _user: AuthUser,
-    @Body() body: Record<string, unknown>,
+    @Body() body: ContactPayloadDto,
   ) {
-    return this.contactsService.create(tenant.tenantId, body);
+    return this.contactsService.create(tenant.tenantId, { ...body });
   }
 
   @Patch(':id')
@@ -102,9 +96,9 @@ export class ContactsController {
   update(
     @TenantCtx() tenant: TenantContext,
     @Param('id') id: string,
-    @Body() body: Record<string, unknown>,
+    @Body() body: ContactPayloadDto,
   ) {
-    return this.contactsService.update(tenant.tenantId, id, body);
+    return this.contactsService.update(tenant.tenantId, id, { ...body });
   }
 
   @Delete(':id')

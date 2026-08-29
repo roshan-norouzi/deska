@@ -29,6 +29,10 @@ export function useApi<T = unknown>(
 
   const fetchOptionsRef = useRef(fetchOptions);
   fetchOptionsRef.current = fetchOptions;
+  const onSuccessRef = useRef(onSuccess);
+  const onErrorRef = useRef(onError);
+  onSuccessRef.current = onSuccess;
+  onErrorRef.current = onError;
 
   const execute = useCallback(async (overridePath?: string, overrideOptions?: ApiFetchOptions) => {
     const targetPath = overridePath ?? path;
@@ -39,15 +43,17 @@ export function useApi<T = unknown>(
     try {
       const data = await apiFetch<T>(targetPath, { ...fetchOptionsRef.current, ...overrideOptions });
       setState({ data, error: null, isLoading: false });
-      onSuccess?.(data);
+      onSuccessRef.current?.(data);
       return data;
     } catch (err) {
       const message = err instanceof ApiError ? err.message : 'خطای ناشناخته';
       setState((prev) => ({ ...prev, error: message, isLoading: false }));
-      onError?.(message);
+      onErrorRef.current?.(message);
       return null;
     }
-  }, [path, onSuccess, onError]);
+  }, [path]);
+
+  const refetch = useCallback(() => execute(), [execute]);
 
   const mutate = useCallback((data: T | null) => {
     setState((prev) => ({ ...prev, data }));
@@ -61,14 +67,14 @@ export function useApi<T = unknown>(
     if (immediate && path) {
       void execute();
     }
-  }, [path, immediate]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [execute, immediate, path]);
 
   return {
     ...state,
     execute,
     mutate,
     reset,
-    refetch: () => execute(),
+    refetch,
   };
 }
 

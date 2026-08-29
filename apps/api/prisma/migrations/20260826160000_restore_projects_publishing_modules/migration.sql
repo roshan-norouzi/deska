@@ -1,5 +1,10 @@
 -- These modules are optional (not core), but are enabled for existing tenants
 -- so upgrading DESKA does not silently remove their navigation.
+ALTER TABLE "ModuleDefinition"
+  ADD COLUMN IF NOT EXISTS "source" TEXT NOT NULL DEFAULT 'builtin',
+  ADD COLUMN IF NOT EXISTS "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  ADD COLUMN IF NOT EXISTS "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;
+
 INSERT INTO "ModuleDefinition" ("id", "name", "domain", "version", "dependencies", "isCore", "source", "createdAt", "updatedAt")
 VALUES
   ('projects-tasks', 'مدیریت پروژه و تسک', 'productivity', '1.0.0', ARRAY[]::text[], false, 'builtin', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP),

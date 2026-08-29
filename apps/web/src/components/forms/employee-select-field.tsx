@@ -4,7 +4,7 @@ import { useApi } from '@/hooks/use-api';
 import { extractListItems } from '@/lib/list-utils';
 import { formatEmployeeLabel } from '@deska/shared';
 
-interface HrEmployee {
+interface Employee {
   id: string;
   employeeCode: string;
   jobTitle?: string | null;
@@ -25,8 +25,8 @@ export function EmployeeSelectField({
   onChange,
   required,
 }: EmployeeSelectFieldProps) {
-  const { data, isLoading } = useApi<unknown>('/hr/employees?status=active');
-  const employees = extractListItems<HrEmployee>(data);
+  const { data, isLoading } = useApi<unknown>('/employees?status=active');
+  const employees = extractListItems<Employee>(data);
 
   return (
     <div>

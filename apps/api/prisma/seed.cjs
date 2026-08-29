@@ -1,18 +1,28 @@
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
-const { APP_PERMISSIONS, MODULE_CATALOG } = require('@deska/shared');
+const { getDefaultPermissionsForTenantRole, MODULE_CATALOG } = require('@deska/shared');
 const systemObservances = require('./system-observances.json');
 
 const prisma = new PrismaClient();
 
 async function main() {
   const email = process.env.SEED_ADMIN_EMAIL || 'admin@deska.local';
-  const passwordHash = await bcrypt.hash(process.env.SEED_ADMIN_PASSWORD || 'Admin@1234', 10);
-  const admin = await prisma.user.upsert({
-    where: { email },
-    create: { email, passwordHash, name: process.env.SEED_ADMIN_NAME || 'مدیر سیستم', role: 'super_admin' },
-    update: { passwordHash, role: 'super_admin' },
-  });
+  const existingAdmin = await prisma.user.findUnique({ where: { email } });
+  if (existingAdmin && existingAdmin.role !== 'super_admin') {
+    throw new Error('SEED_ADMIN_EMAIL already belongs to a non-admin account');
+  }
+  let admin = existingAdmin;
+  if (!admin) {
+    const bootstrapPassword = process.env.SEED_ADMIN_PASSWORD
+      || (process.env.NODE_ENV === 'production' ? '' : 'Admin@1234');
+    if (bootstrapPassword.length < 12) {
+      throw new Error('A unique SEED_ADMIN_PASSWORD of at least 12 characters is required for initial provisioning');
+    }
+    const passwordHash = await bcrypt.hash(bootstrapPassword, 12);
+    admin = await prisma.user.create({
+      data: { email, passwordHash, name: process.env.SEED_ADMIN_NAME || 'مدیر سیستم', role: 'super_admin' },
+    });
+  }
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'default' },
     create: { name: 'سازمان پیش‌فرض', slug: 'default', plan: 'enterprise', settings: { currency: 'IRR', timezone: 'Asia/Tehran' } },
@@ -21,7 +31,11 @@ async function main() {
   await prisma.tenantMember.upsert({
     where: { tenantId_userId: { tenantId: tenant.id, userId: admin.id } },
     create: { tenantId: tenant.id, userId: admin.id, role: 'owner' },
-    update: { role: 'owner' },
+    update: {},
+  });
+  await prisma.tenant.update({
+    where: { id: tenant.id },
+    data: { status: 'active', isActive: true, createdByUserId: admin.id, primaryOwnerUserId: admin.id },
   });
   for (const mod of MODULE_CATALOG) {
     await prisma.moduleDefinition.upsert({
@@ -32,18 +46,22 @@ async function main() {
     await prisma.tenantModule.upsert({
       where: { tenantId_moduleId: { tenantId: tenant.id, moduleId: mod.id } },
       create: { tenantId: tenant.id, moduleId: mod.id, enabled: true },
-      update: { enabled: true },
+      update: {},
     });
   }
   const role = await prisma.roleDefinition.upsert({
     where: { tenantId_name: { tenantId: tenant.id, name: 'مدیر' } },
-    create: { tenantId: tenant.id, name: 'مدیر', description: 'مدیریت هسته و منابع انسانی', isSystem: true },
+    create: { tenantId: tenant.id, name: 'مدیر', description: 'مدیریت هسته و کارمندان', isSystem: true },
     update: {},
   });
-  for (const permission of APP_PERMISSIONS) {
+  const managerPermissions = getDefaultPermissionsForTenantRole('manager');
+  await prisma.rolePermission.deleteMany({
+    where: { roleId: role.id, permission: { notIn: managerPermissions } },
+  });
+  for (const permission of managerPermissions) {
     await prisma.rolePermission.upsert({
-      where: { roleId_permission: { roleId: role.id, permission: permission.key } },
-      create: { roleId: role.id, permission: permission.key },
+      where: { roleId_permission: { roleId: role.id, permission } },
+      create: { roleId: role.id, permission },
       update: {},
     });
   }

@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
 
 export default function UsersRedirectPage() {
-  redirect('/hr/employees')
+  redirect('/employees')
 }

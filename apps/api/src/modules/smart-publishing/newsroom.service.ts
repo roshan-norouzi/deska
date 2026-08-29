@@ -10,6 +10,7 @@ import { WordPressClient } from './wordpress.client';
 
 const REJECT_RETENTION_MS = 3 * 24 * 60 * 60 * 1000;
 const PROCESSING_TIMEOUT_MS = 15 * 60 * 1000;
+const DAILY_REPORT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function normalizePurpose(value: unknown, fallback: FeedPurpose = 'news-room'): FeedPurpose {
   return FEED_PURPOSES.includes(value as FeedPurpose) ? value as FeedPurpose : fallback;
@@ -115,11 +116,16 @@ export class NewsroomService {
       throw new BadRequestException('وضعیت خبر معتبر نیست');
     }
     return this.prisma.newsArticle.findMany({
-      where: { tenantId, ...(status ? { status } : {}) },
+      where: { tenantId, feed: { purpose: 'news-room' }, ...(status ? { status } : {}) },
       include: { feed: { select: { id: true, name: true, purpose: true } } },
       orderBy: [{ publishedAtSource: 'desc' }, { createdAt: 'desc' }],
       take: 200,
     });
+  }
+
+  async deleteAllArticles(tenantId: string) {
+    const result = await this.prisma.newsArticle.deleteMany({ where: { tenantId, feed: { purpose: 'news-room' } } });
+    return { ok: true, deleted: result.count };
   }
 
   async updateArticle(tenantId: string, id: string, data: UpdateNewsArticleDto) {
@@ -144,13 +150,18 @@ export class NewsroomService {
 
   async fetchFeed(tenantId: string, feedId: string) {
     const feed = await this.findFeed(tenantId, feedId);
-    if (feed.purpose !== 'news-room') throw new BadRequestException('پایش این فید پس از تکمیل بخش مربوط به آن فعال می‌شود');
+    if (!['news-room', 'daily-report'].includes(feed.purpose)) throw new BadRequestException('پایش این فید در بخش مربوط به آن انجام می‌شود');
     if (!feed.enabled) throw new BadRequestException('ابتدا فید را فعال کنید');
     try {
       const settings = await this.settings.getRaw(tenantId);
-      const maxAgeDays = Number(settings.news_max_age_days || 10);
-      const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
-      const entries = (await this.sourceReader.readFeed(feed.url)).filter((entry) => !entry.publishedAt || entry.publishedAt >= cutoff);
+      const maxAgeMs = feed.purpose === 'daily-report'
+        ? DAILY_REPORT_MAX_AGE_MS
+        : Number(settings.news_max_age_days || 10) * 24 * 60 * 60 * 1000;
+      const now = new Date();
+      const cutoff = new Date(now.getTime() - maxAgeMs);
+      const entries = (await this.sourceReader.readFeed(feed.url)).filter((entry) => feed.purpose === 'daily-report'
+        ? Boolean(entry.publishedAt && entry.publishedAt >= cutoff && entry.publishedAt <= now)
+        : !entry.publishedAt || entry.publishedAt >= cutoff);
       const result = entries.length ? await this.prisma.newsArticle.createMany({
         skipDuplicates: true,
         data: entries.map((entry) => ({
@@ -165,7 +176,7 @@ export class NewsroomService {
           featuredImageUrl: entry.featuredImageUrl,
           sourceName: feed.name,
           publishedAtSource: entry.publishedAt,
-          status: 'new',
+          status: feed.purpose === 'daily-report' ? 'report_available' : 'new',
         })),
       }) : { count: 0 };
       await this.prisma.newsFeed.update({ where: { id: feedId }, data: { lastFetchedAt: new Date(), lastError: '' } });
@@ -220,7 +231,7 @@ export class NewsroomService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'خطای ناشناخته GapGPT';
-      await this.prisma.newsArticle.update({ where: { id }, data: { status: 'failed', processingStartedAt: null, lastError: message.slice(0, 1000) } });
+      await this.prisma.newsArticle.updateMany({ where: { id, tenantId, status: 'processing' }, data: { status: 'failed', processingStartedAt: null, lastError: message.slice(0, 1000) } });
       throw new BadRequestException(`ترجمه و خلاصه‌سازی انجام نشد: ${message}`);
     }
   }
@@ -276,6 +287,7 @@ export class NewsroomService {
         title: article.titleFa,
         excerpt: article.summaryFa,
         content: toWordPressHtml(contentFa, article.sourceName, article.originalUrl || article.canonicalUrl),
+        featuredImageUrl,
       });
       return await this.prisma.newsArticle.update({
         where: { id },
@@ -290,7 +302,7 @@ export class NewsroomService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'خطای ناشناخته انتشار';
-      await this.prisma.newsArticle.update({ where: { id }, data: { status: 'publish_failed', processingStartedAt: null, lastError: message.slice(0, 1000) } });
+      await this.prisma.newsArticle.updateMany({ where: { id, tenantId, status: 'publishing' }, data: { status: 'publish_failed', processingStartedAt: null, lastError: message.slice(0, 1000) } });
       throw new BadRequestException(`انتشار خبر انجام نشد: ${message}`);
     }
   }
@@ -304,12 +316,19 @@ export class NewsroomService {
     if (this.maintenanceRunning) return;
     this.maintenanceRunning = true;
     try {
-      const staleBefore = new Date(Date.now() - PROCESSING_TIMEOUT_MS);
-      await this.prisma.newsArticle.updateMany({ where: { status: 'processing', processingStartedAt: { lte: staleBefore } }, data: { status: 'new', processingStartedAt: null } });
-      await this.prisma.newsArticle.updateMany({ where: { status: 'publishing', processingStartedAt: { lte: staleBefore } }, data: { status: 'publish_failed', processingStartedAt: null, lastError: 'عملیات انتشار قبلی ناتمام مانده بود؛ دوباره تلاش کنید' } });
-      await this.purgeRejected();
+      const enabledModules = await this.prisma.tenantModule.findMany({
+        where: { moduleId: 'smart-publishing', enabled: true, tenant: { isActive: true } },
+        select: { tenantId: true },
+      });
+      const enabledTenantIds = enabledModules.map((row) => row.tenantId);
+      if (!enabledTenantIds.length) return;
 
-      const feeds = await this.prisma.newsFeed.findMany({ where: { purpose: 'news-room', enabled: true }, orderBy: { lastFetchedAt: 'asc' } });
+      const staleBefore = new Date(Date.now() - PROCESSING_TIMEOUT_MS);
+      await this.prisma.newsArticle.updateMany({ where: { tenantId: { in: enabledTenantIds }, status: 'processing', processingStartedAt: { lte: staleBefore } }, data: { status: 'new', processingStartedAt: null } });
+      await this.prisma.newsArticle.updateMany({ where: { tenantId: { in: enabledTenantIds }, status: 'publishing', processingStartedAt: { lte: staleBefore } }, data: { status: 'publish_failed', processingStartedAt: null, lastError: 'عملیات انتشار قبلی ناتمام مانده بود؛ دوباره تلاش کنید' } });
+      await this.prisma.newsArticle.deleteMany({ where: { tenantId: { in: enabledTenantIds }, status: 'rejected', purgeAfter: { lte: new Date() } } });
+
+      const feeds = await this.prisma.newsFeed.findMany({ where: { tenantId: { in: enabledTenantIds }, purpose: 'news-room', enabled: true }, orderBy: { lastFetchedAt: 'asc' } });
       const tenantIds = new Set<string>();
       for (const feed of feeds) {
         const settings = await this.settings.getRaw(feed.tenantId);
@@ -321,7 +340,7 @@ export class NewsroomService {
         tenantIds.add(feed.tenantId);
       }
       const pendingTenants = await this.prisma.newsArticle.findMany({
-        where: { status: 'new' },
+        where: { tenantId: { in: enabledTenantIds }, status: 'new' },
         distinct: ['tenantId'],
         select: { tenantId: true },
       });

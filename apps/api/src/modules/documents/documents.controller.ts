@@ -25,6 +25,16 @@ import { PermissionsGuard } from '../../common/guards/permissions.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { DocumentsService } from './documents.service';
 
+const SAFE_INLINE_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/avif',
+  'image/gif',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'text/plain',
+]);
+
 @Controller('documents')
 @UseGuards(JwtAuthGuard, TenantGuard, PermissionsGuard, ModuleEnabledGuard)
 @RequireModule('documents')
@@ -84,8 +94,11 @@ export class DocumentsController {
     @Res() res: Response,
   ) {
     const file = await this.documentsService.getFilePath(tenant.tenantId, id);
-    res.setHeader('Content-Type', file.mimeType);
-    res.setHeader('Content-Disposition', `inline; filename="${encodeURIComponent(file.originalName)}"`);
+    const canPreviewInline = SAFE_INLINE_MIME_TYPES.has(file.mimeType.toLowerCase());
+    res.setHeader('Content-Type', canPreviewInline ? file.mimeType : 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "sandbox; default-src 'none'");
+    res.setHeader('Content-Disposition', `${canPreviewInline ? 'inline' : 'attachment'}; filename="${encodeURIComponent(file.originalName)}"`);
     fs.createReadStream(file.path).pipe(res);
   }
 
@@ -97,7 +110,8 @@ export class DocumentsController {
     @Res() res: Response,
   ) {
     const file = await this.documentsService.getFilePath(tenant.tenantId, id);
-    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(file.originalName)}"`);
     fs.createReadStream(file.path).pipe(res);
   }

@@ -10,6 +10,7 @@ export const NAV_GROUPS: NavGroup[] = [
     { href: '/contacts', label: 'مخاطبین', icon: Users, moduleId: 'contacts' },
     { href: '/documents', label: 'اسناد', icon: FileText, moduleId: 'documents' },
     { href: '/calendar', label: 'تقویم', icon: Calendar, moduleId: 'calendar' },
+    { href: '/employees', label: 'کارمندان', icon: UserCheck, moduleId: 'employees' },
   ] },
   { id: 'projects', label: 'مدیریت پروژه و تسک', domain: MODULE_DOMAINS.PRODUCTIVITY, items: [
     { href: '/projects', label: 'پروژه‌ها', icon: FolderKanban, moduleId: 'projects-tasks' },
@@ -20,13 +21,7 @@ export const NAV_GROUPS: NavGroup[] = [
     { href: '/publishing/news', label: 'اتاق خبر', icon: Send, moduleId: 'smart-publishing' },
     { href: '/publishing/social', label: 'استودیوی اجتماعی', icon: Send, moduleId: 'smart-publishing' },
     { href: '/publishing/daily-report', label: 'دیلی‌ریپورت', icon: Send, moduleId: 'smart-publishing' },
-    { href: '/publishing/channels', label: 'کانال‌های انتشار', icon: Send, moduleId: 'smart-publishing' },
     { href: '/publishing/settings', label: 'تنظیمات نشر هوشمند', icon: Send, moduleId: 'smart-publishing' },
-  ] },
-  { id: 'hr', label: 'منابع انسانی', domain: MODULE_DOMAINS.HR, items: [
-    { href: '/hr', label: 'داشبورد HR', icon: LayoutDashboard, moduleId: 'hr' },
-    { href: '/hr/employees', label: 'کارمندان', icon: UserCheck, moduleId: 'hr' },
-    { href: '/hr/departments', label: 'دپارتمان‌ها', icon: Building2, moduleId: 'hr' },
   ] },
   { id: 'settings', label: 'تنظیمات', domain: MODULE_DOMAINS.PLATFORM, items: [
     { href: '/settings', label: 'تنظیمات سازمان', icon: Settings },

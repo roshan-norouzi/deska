@@ -343,7 +343,7 @@ function DocumentsContent() {
                           <TableCell>
                             {(file.entityType === 'Contact' || file.entityType === 'Employee') && file.entityId ? (
                               <Link
-                                href={file.entityType === 'Employee' ? `/hr/employees/${file.entityId}` : `/contacts/${file.entityId}`}
+                                href={file.entityType === 'Employee' ? `/employees/${file.entityId}` : `/contacts/${file.entityId}`}
                                 className="text-primary-600 hover:text-primary-800 hover:underline"
                               >
                                 {file.entityName ?? '—'}

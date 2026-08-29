@@ -8,9 +8,8 @@ export interface EntityRelationSpec {
 
 export const ENTITY_RELATIONS: Record<string, EntityRelationSpec> = {
   Contact: { label: 'مخاطب', detailPath: (id) => `/contacts/${id}`, moduleId: 'contacts' },
-  Employee: { label: 'کارمند', detailPath: (id) => `/hr/employees/${id}`, moduleId: 'hr' },
-  Department: { label: 'دپارتمان', detailPath: (id) => `/hr/departments`, moduleId: 'hr' },
-  JobOpening: { label: 'آگهی استخدام', detailPath: (id) => `/hr/recruitment/${id}`, moduleId: 'hr' },
+  Employee: { label: 'کارمند', detailPath: (id) => `/employees/${id}`, moduleId: 'employees' },
+  Department: { label: 'دپارتمان', detailPath: () => `/employees`, moduleId: 'employees' },
 };
 
 export function getEntityDetailHref(entityType: string, entityId: string): string | null {
@@ -25,5 +24,5 @@ export function getEntityLabel(entityType: string): string {
 
 /** Quick links from a contact to related modules */
 export const CONTACT_RELATED_LINKS = [
-  { href: (id: string) => `/hr/employees?contactId=${id}`, label: 'کارمندان HR' },
+  { href: (id: string) => `/employees?contactId=${id}`, label: 'کارمندان' },
 ] as const;

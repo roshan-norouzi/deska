@@ -1,4 +1,14 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from 'class-validator';
+import {
+  Equals,
+  IsBoolean,
+  IsEmail,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class RegisterDto {
   @IsEmail({}, { message: 'ایمیل معتبر نیست' })
@@ -7,10 +17,25 @@ export class RegisterDto {
 
   @IsString({ message: 'رمز عبور باید متن باشد' })
   @IsNotEmpty({ message: 'رمز عبور الزامی است' })
-  @MinLength(6, { message: 'رمز عبور باید حداقل ۶ کاراکتر باشد' })
+  @MinLength(12, { message: 'رمز عبور باید حداقل ۱۲ کاراکتر باشد' })
+  @MaxLength(128, { message: 'رمز عبور حداکثر ۱۲۸ کاراکتر است' })
   password!: string;
+
+  @IsString({ message: 'تکرار رمز عبور باید متن باشد' })
+  @IsNotEmpty({ message: 'تکرار رمز عبور الزامی است' })
+  confirmPassword!: string;
 
   @IsString({ message: 'نام باید متن باشد' })
   @IsNotEmpty({ message: 'نام الزامی است' })
+  @MaxLength(120, { message: 'نام حداکثر ۱۲۰ کاراکتر است' })
   name!: string;
+
+  @IsOptional()
+  @IsString({ message: 'شماره تلفن باید متن باشد' })
+  @Matches(/^(?:\+?[1-9]\d{7,14}|09\d{9})$/, { message: 'شماره تلفن معتبر نیست' })
+  phone?: string;
+
+  @IsBoolean({ message: 'پذیرش قوانین باید مشخص شود' })
+  @Equals(true, { message: 'پذیرش قوانین برای ثبت‌نام الزامی است' })
+  acceptTerms!: boolean;
 }

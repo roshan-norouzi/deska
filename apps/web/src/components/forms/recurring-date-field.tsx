@@ -50,7 +50,8 @@ export function RecurringDateField({
   const [month, setMonth] = useState(parsed?.month ?? 1)
 
   useEffect(() => {
-    if (parsed?.month) setMonth(parsed.month)
+    const nextMonth = parseValue(value)?.month
+    if (nextMonth) setMonth(nextMonth)
   }, [value])
 
   useEffect(() => {

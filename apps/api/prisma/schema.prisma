@@ -9,212 +9,320 @@ datasource db {
 
 // ============ PROJECTS & SMART PUBLISHING ============
 model Project {
-  id String @id @default(cuid())
-  tenantId String
-  name String
-  description String?
-  status String @default("active")
-  workType String @default("project")
-  managerId String?
-  parentId String?
-  progressPercent Int @default(0)
-  budget Decimal? @db.Decimal(15,2)
-  cost Decimal? @db.Decimal(15,2)
-  revenue Decimal? @db.Decimal(15,2)
-  archivedAt DateTime?
-  startDate DateTime?
-  dueDate DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  tasks Task[]
-  members ProjectMember[]
-  parent Project? @relation("ProjectTree", fields: [parentId], references: [id], onDelete: SetNull)
-  subProjects Project[] @relation("ProjectTree")
+  id              String          @id @default(cuid())
+  tenantId        String
+  name            String
+  description     String?
+  status          String          @default("active")
+  workType        String          @default("project")
+  managerId       String?
+  parentId        String?
+  progressPercent Int             @default(0)
+  budget          Decimal?        @db.Decimal(15, 2)
+  cost            Decimal?        @db.Decimal(15, 2)
+  revenue         Decimal?        @db.Decimal(15, 2)
+  archivedAt      DateTime?
+  startDate       DateTime?
+  dueDate         DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  tasks           Task[]
+  members         ProjectMember[]
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  parent          Project?        @relation("ProjectTree", fields: [parentId], references: [id], onDelete: SetNull)
+  subProjects     Project[]       @relation("ProjectTree")
+
   @@index([tenantId, status])
 }
+
 model Task {
-  id String @id @default(cuid())
-  tenantId String
-  projectId String?
-  title String
-  description String?
-  status String @default("todo")
-  priority String @default("normal")
-  assigneeId String?
-  dueDate DateTime?
-  parentId String?
-  recurrenceType String @default("none")
-  recurrenceInterval Int @default(1)
+  id                  String          @id @default(cuid())
+  tenantId            String
+  projectId           String?
+  title               String
+  description         String?
+  status              String          @default("todo")
+  priority            String          @default("normal")
+  assigneeId          String?
+  dueDate             DateTime?
+  parentId            String?
+  recurrenceType      String          @default("none")
+  recurrenceInterval  Int             @default(1)
   recurrenceStartDate DateTime?
-  recurrenceRule Json?
-  sortOrder Int @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  project Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  parent Task? @relation("TaskTree", fields: [parentId], references: [id], onDelete: SetNull)
-  subtasks Task[] @relation("TaskTree")
-  checklist ChecklistItem[]
-  approvals ApprovalStep[]
+  recurrenceRule      Json?
+  sortOrder           Int             @default(0)
+  createdAt           DateTime        @default(now())
+  updatedAt           DateTime        @updatedAt
+  tenant              Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  project             Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  parent              Task?           @relation("TaskTree", fields: [parentId], references: [id], onDelete: SetNull)
+  subtasks            Task[]          @relation("TaskTree")
+  checklist           ChecklistItem[]
+  approvals           ApprovalStep[]
+
   @@index([tenantId, status])
   @@index([tenantId, projectId])
 }
+
 model ProjectMember {
-  id String @id @default(cuid())
+  id        String   @id @default(cuid())
   projectId String
-  userId String
+  userId    String
   createdAt DateTime @default(now())
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  @@unique([projectId,userId])
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, userId])
   @@index([userId])
 }
+
 model ChecklistItem {
-  id String @id @default(cuid())
-  taskId String
-  title String
-  isDone Boolean @default(false)
-  sortOrder Int @default(0)
+  id        String   @id @default(cuid())
+  taskId    String
+  title     String
+  isDone    Boolean  @default(false)
+  sortOrder Int      @default(0)
   createdAt DateTime @default(now())
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
 }
+
 model ApprovalStep {
-  id String @id @default(cuid())
-  taskId String
+  id         String    @id @default(cuid())
+  taskId     String
   approverId String
-  stepOrder Int
-  status String @default("pending")
-  comment String?
-  decidedAt DateTime?
-  createdAt DateTime @default(now())
-  task Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  stepOrder  Int
+  status     String    @default("pending")
+  comment    String?
+  decidedAt  DateTime?
+  createdAt  DateTime  @default(now())
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
   @@index([taskId])
 }
+
 model PublishChannel {
-  id String @id @default(cuid())
-  tenantId String
-  name String
-  type String
-  endpoint String?
-  enabled Boolean @default(true)
-  settings Json @default("{}")
-  createdAt DateTime @default(now())
-  articles PublishArticle[]
+  id        String           @id @default(cuid())
+  tenantId  String
+  name      String
+  type      String
+  endpoint  String?
+  enabled   Boolean          @default(true)
+  settings  Json             @default("{}")
+  createdAt DateTime         @default(now())
+  articles  PublishArticle[]
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
   @@index([tenantId, type])
 }
+
 model PublishArticle {
-  id String @id @default(cuid())
-  tenantId String
-  channelId String?
-  title String
-  body String
-  status String @default("draft")
+  id          String          @id @default(cuid())
+  tenantId    String
+  channelId   String?
+  title       String
+  body        String
+  status      String          @default("draft")
   scheduledAt DateTime?
   publishedAt DateTime?
   createdById String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  channel PublishChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  channel     PublishChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+
   @@index([tenantId, status])
   @@index([tenantId, scheduledAt])
 }
+
 model NewsFeed {
-  id String @id @default(cuid())
-  tenantId String
-  name String
-  url String
-  purpose String @default("news-room")
-  enabled Boolean @default(true)
-  lastFetchedAt DateTime?
-  lastError String @default("")
-  createdAt DateTime @default(now())
-  articles NewsArticle[]
-  @@unique([tenantId,url])
-  @@index([tenantId,enabled])
+  id             String          @id @default(cuid())
+  tenantId       String
+  name           String
+  url            String
+  purpose        String          @default("news-room")
+  enabled        Boolean         @default(true)
+  lastFetchedAt  DateTime?
+  lastError      String          @default("")
+  createdAt      DateTime        @default(now())
+  articles       NewsArticle[]
+  socialArticles SocialArticle[]
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@unique([tenantId, url])
+  @@index([tenantId, enabled])
+  @@index([tenantId, purpose])
 }
+
 model NewsArticle {
-  id String @id @default(cuid())
-  tenantId String
-  feedId String?
-  canonicalUrl String
-  originalUrl String @default("")
-  guid String @default("")
-  originalTitle String @default("")
-  originalSummary String @default("")
-  originalContent String @default("")
-  titleFa String @default("")
-  summaryFa String @default("")
-  contentFa String @default("")
-  featuredImageUrl String @default("")
-  status String @default("new")
-  sourceName String @default("")
-  publishedAtSource DateTime?
-  rejectedAt DateTime?
-  purgeAfter DateTime?
-  processingStartedAt DateTime?
-  publishedAt DateTime?
-  wordpressPostId String @default("")
-  wordpressPostUrl String @default("")
-  lastError String @default("")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  feed NewsFeed? @relation(fields:[feedId],references:[id],onDelete:SetNull)
-  @@unique([tenantId,canonicalUrl])
-  @@index([tenantId,status])
-  @@index([status,purgeAfter])
+  id                   String                       @id @default(cuid())
+  tenantId             String
+  feedId               String?
+  canonicalUrl         String
+  originalUrl          String                       @default("")
+  guid                 String                       @default("")
+  originalTitle        String                       @default("")
+  originalSummary      String                       @default("")
+  originalContent      String                       @default("")
+  titleFa              String                       @default("")
+  summaryFa            String                       @default("")
+  contentFa            String                       @default("")
+  featuredImageUrl     String                       @default("")
+  status               String                       @default("new")
+  sourceName           String                       @default("")
+  publishedAtSource    DateTime?
+  rejectedAt           DateTime?
+  purgeAfter           DateTime?
+  processingStartedAt  DateTime?
+  publishedAt          DateTime?
+  wordpressPostId      String                       @default("")
+  wordpressPostUrl     String                       @default("")
+  lastError            String                       @default("")
+  createdAt            DateTime                     @default(now())
+  updatedAt            DateTime                     @updatedAt
+  tenant               Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  feed                 NewsFeed?                    @relation(fields: [feedId], references: [id], onDelete: SetNull)
+  dailyReportItems     DailyReportItem[]
+  dailyReportDecisions DailyReportArticleDecision[]
+
+  @@unique([tenantId, canonicalUrl])
+  @@index([tenantId, status])
+  @@index([status, purgeAfter])
 }
+
+model DailyReport {
+  id         String                       @id @default(cuid())
+  tenantId   String
+  reportDate DateTime                     @db.Date
+  status     String                       @default("draft")
+  archivedAt DateTime?
+  createdAt  DateTime                     @default(now())
+  updatedAt  DateTime                     @updatedAt
+  tenant     Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  items      DailyReportItem[]
+  decisions  DailyReportArticleDecision[]
+
+  @@unique([tenantId, reportDate])
+  @@index([tenantId, status])
+}
+
+model DailyReportArticleDecision {
+  id        String      @id @default(cuid())
+  tenantId  String
+  reportId  String
+  articleId String
+  decision  String      @default("rejected")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  report    DailyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  article   NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, articleId])
+  @@index([tenantId, decision])
+  @@index([articleId])
+}
+
+model DailyReportItem {
+  id                String       @id @default(cuid())
+  tenantId          String
+  reportId          String
+  articleId         String?
+  originalTitle     String
+  originalUrl       String
+  englishTitle      String       @default("")
+  sourceName        String       @default("")
+  sourcePublishedAt DateTime?
+  segment           String       @default("Neutral")
+  sourceTier        String       @default("Tier 1")
+  bullets           Json         @default("[]")
+  status            String       @default("pending")
+  sortOrder         Int          @default(0)
+  lastError         String       @default("")
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  report            DailyReport  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  article           NewsArticle? @relation(fields: [articleId], references: [id], onDelete: SetNull)
+
+  @@unique([reportId, articleId])
+  @@index([tenantId])
+  @@index([reportId, sortOrder])
+}
+
 model SocialFeed {
-  id String @id @default(cuid())
-  tenantId String
-  name String
-  url String
-  category String?
-  isActive Boolean @default(true)
+  id        String   @id @default(cuid())
+  tenantId  String
+  name      String
+  url       String
+  category  String?
+  isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  articles SocialArticle[]
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
   @@index([tenantId])
 }
+
 model SocialArticle {
-  id String @id @default(cuid())
-  tenantId String
-  feedId String?
-  title String
-  link String
-  author String?
-  category String?
-  publishedAt DateTime?
-  featuredImageUrl String?
-  originalText String?
-  leadText String?
-  summaryText String?
-  rewrittenText String?
-  readingTime Int?
-  status String @default("pending")
-  telegramSentAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  feed SocialFeed? @relation(fields:[feedId],references:[id],onDelete:SetNull)
-  @@unique([tenantId,link])
-  @@index([tenantId,status])
+  id                  String    @id @default(cuid())
+  tenantId            String
+  feedId              String?
+  title               String
+  link                String
+  author              String?
+  category            String?
+  publishedAt         DateTime?
+  featuredImageUrl    String?
+  authorImageUrl      String?
+  originalText        String?
+  leadText            String?
+  summaryText         String?
+  rewrittenText       String?
+  shortUrl            String?
+  captionText         String?
+  readingTime         Int?
+  status              String    @default("pending")
+  processingStartedAt DateTime?
+  lastError           String    @default("")
+  telegramSentAt      DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  feed                NewsFeed? @relation(fields: [feedId], references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, link])
+  @@index([tenantId, status])
+  @@index([feedId])
 }
 
 // ============ PLATFORM CORE ============
 
 model User {
-  id            String         @id @default(cuid())
-  email         String         @unique
-  passwordHash  String
-  name          String
-  role          String         @default("user")
-  avatarUrl     String?
-  isActive      Boolean        @default(true)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
-  refreshTokens RefreshToken[]
-  tenantMembers TenantMember[]
-  notifications Notification[]
-  auditLogs     AuditLog[]     @relation("AuditUser")
-  activities    Activity[]     @relation("ActivityUser")
-  employees     Employee[]
+  id                    String               @id @default(cuid())
+  email                 String               @unique
+  phone                 String?              @unique
+  passwordHash          String
+  name                  String
+  role                  String               @default("user")
+  status                String               @default("active")
+  avatarUrl             String?
+  isActive              Boolean              @default(true)
+  emailVerifiedAt       DateTime?
+  lastLoginAt           DateTime?
+  failedLoginAttempts   Int                  @default(0)
+  lockedUntil           DateTime?
+  passwordChangedAt     DateTime?
+  sessionsInvalidatedAt DateTime?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+  refreshTokens         RefreshToken[]
+  passwordResetTokens   PasswordResetToken[]
+  tenantMembers         TenantMember[]
+  createdTenants        Tenant[]             @relation("TenantCreatedBy")
+  primaryOwnedTenants   Tenant[]             @relation("TenantPrimaryOwner")
+  notifications         Notification[]
+  auditLogs             AuditLog[]           @relation("AuditUser")
+  activities            Activity[]           @relation("ActivityUser")
+  employees             Employee[]
 }
 
 model RefreshToken {
@@ -224,48 +332,110 @@ model RefreshToken {
   expiresAt DateTime
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  userId    String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
 }
 
 model Tenant {
-  id          String             @id @default(cuid())
-  name        String
-  slug        String             @unique
-  plan        String             @default("starter")
-  settings    Json               @default("{}")
-  locale      String             @default("fa-IR")
-  isActive    Boolean            @default(true)
-  createdAt   DateTime           @default(now())
-  updatedAt   DateTime           @updatedAt
-  members     TenantMember[]
-  modules     TenantModule[]
-  roles       RoleDefinition[]
-  invitations TenantInvitation[]
+  id                     String                       @id @default(cuid())
+  name                   String
+  slug                   String                       @unique
+  plan                   String                       @default("starter")
+  status                 String                       @default("active")
+  settings               Json                         @default("{}")
+  locale                 String                       @default("fa-IR")
+  isActive               Boolean                      @default(true)
+  createdByUserId        String?
+  primaryOwnerUserId     String?
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
+  createdBy              User?                        @relation("TenantCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  primaryOwner           User?                        @relation("TenantPrimaryOwner", fields: [primaryOwnerUserId], references: [id], onDelete: SetNull)
+  members                TenantMember[]
+  modules                TenantModule[]
+  roles                  RoleDefinition[]
+  invitations            TenantInvitation[]
+  projects               Project[]
+  tasks                  Task[]
+  publishChannels        PublishChannel[]
+  publishArticles        PublishArticle[]
+  newsFeeds              NewsFeed[]
+  newsArticles           NewsArticle[]
+  dailyReports           DailyReport[]
+  dailyReportDecisions   DailyReportArticleDecision[]
+  dailyReportItems       DailyReportItem[]
+  socialFeeds            SocialFeed[]
+  socialArticles         SocialArticle[]
+  customFieldDefinitions CustomFieldDefinition[]
+  customFieldValues      CustomFieldValue[]
+  numberSequences        NumberSequence[]
+  contacts               Contact[]
+  contactBankAccounts    ContactBankAccount[]
+  documentFolders        DocumentFolder[]
+  documentFiles          DocumentFile[]
+  calendarEvents         CalendarEvent[]
+  auditLogs              AuditLog[]
+  activities             Activity[]
+  notifications          Notification[]
+  departments            Department[]
+  employees              Employee[]
+  jobOpenings            JobOpening[]
+
+  @@index([status])
+  @@index([createdByUserId])
+  @@index([primaryOwnerUserId])
 }
 
 model TenantMember {
-  tenantId String
-  userId   String
-  role     String   @default("member")
-  joinedAt DateTime @default(now())
-  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenantId      String
+  userId        String
+  role          String    @default("member")
+  status        String    @default("active")
+  jobTitle      String?
+  metadata      Json      @default("{}")
+  joinedAt      DateTime  @default(now())
+  roleChangedAt DateTime?
+  leftAt        DateTime?
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([tenantId, userId])
   @@index([userId])
+  @@index([tenantId, status])
 }
 
 model TenantInvitation {
-  id        String   @id @default(cuid())
-  tenantId  String
-  email     String
-  role      String   @default("member")
-  token     String   @unique
-  expiresAt DateTime
-  accepted  Boolean  @default(false)
-  createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  id              String    @id @default(cuid())
+  tenantId        String
+  email           String
+  role            String    @default("member")
+  token           String    @unique
+  tokenHash       String?   @unique
+  status          String    @default("pending")
+  invitedByUserId String?
+  expiresAt       DateTime
+  accepted        Boolean   @default(false)
+  acceptedAt      DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @default(now()) @updatedAt
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, email])
+  @@index([tenantId, status])
 }
 
 model ModuleDefinition {
@@ -290,7 +460,7 @@ model TenantModule {
   moduleId String
   enabled  Boolean          @default(false)
   settings Json             @default("{}")
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   module   ModuleDefinition @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 
   @@id([tenantId, moduleId])
@@ -303,7 +473,7 @@ model RoleDefinition {
   description String?
   isSystem    Boolean          @default(false)
   createdAt   DateTime         @default(now())
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   permissions RolePermission[]
 
   @@unique([tenantId, name])
@@ -330,6 +500,7 @@ model CustomFieldDefinition {
   required   Boolean  @default(false)
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, entityType, fieldName])
   @@index([tenantId, entityType])
@@ -346,6 +517,7 @@ model CustomFieldValue {
   valueDate    DateTime?
   valueBoolean Boolean?
   valueJson    Json?
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, entityType, entityId, fieldName])
   @@index([tenantId, entityType, entityId])
@@ -359,6 +531,7 @@ model NumberSequence {
   suffix     String @default("")
   nextNumber Int    @default(1)
   padding    Int    @default(4)
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
 
   @@unique([tenantId, code])
 }
@@ -391,11 +564,14 @@ model Contact {
   isActive           Boolean              @default(true)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
+  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   bankAccounts       ContactBankAccount[]
   employees          Employee[]
 
+  @@unique([tenantId, nationalId])
   @@index([tenantId])
   @@index([tenantId, type])
+  @@index([tenantId, createdAt])
 }
 
 model ContactBankAccount {
@@ -407,6 +583,7 @@ model ContactBankAccount {
   cardNumber    String?
   sheba         String?
   isDefault     Boolean @default(false)
+  tenant        Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   contact       Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
@@ -423,6 +600,7 @@ model DocumentFolder {
   isSystem  Boolean          @default(false)
   systemKey String?
   createdAt DateTime         @default(now())
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   parent    DocumentFolder?  @relation("FolderTree", fields: [parentId], references: [id])
   children  DocumentFolder[] @relation("FolderTree")
   files     DocumentFile[]
@@ -445,6 +623,7 @@ model DocumentFile {
   version      Int             @default(1)
   uploadedById String?
   createdAt    DateTime        @default(now())
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   folder       DocumentFolder? @relation(fields: [folderId], references: [id])
 
   @@index([tenantId])
@@ -471,6 +650,7 @@ model CalendarEvent {
   createdById    String?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   attendees      CalendarEventAttendee[]
 
   @@index([tenantId, startAt])
@@ -511,7 +691,7 @@ model CalendarEventAttendee {
 
 model AuditLog {
   id         String   @id @default(cuid())
-  tenantId   String
+  tenantId   String?
   userId     String?
   action     String
   entityType String
@@ -519,6 +699,7 @@ model AuditLog {
   changes    Json?
   ipAddress  String?
   createdAt  DateTime @default(now())
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
   user       User?    @relation("AuditUser", fields: [userId], references: [id])
 
   @@index([tenantId, entityType, entityId])
@@ -535,6 +716,7 @@ model Activity {
   entityId   String?
   metadata   Json?
   createdAt  DateTime @default(now())
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   user       User?    @relation("ActivityUser", fields: [userId], references: [id])
 
   @@index([tenantId, entityType, entityId])
@@ -550,9 +732,11 @@ model Notification {
   link      String?
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead])
+  @@index([tenantId, userId, isRead, createdAt])
 }
 
 // ============ INVENTORY ============
@@ -565,6 +749,7 @@ model Department {
   name        String
   parentId    String?
   managerId   String?
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   employees   Employee[]
   jobOpenings JobOpening[]
 
@@ -601,6 +786,7 @@ model Employee {
   insuranceNumber        String?
   createdAt              DateTime    @default(now())
   updatedAt              DateTime    @updatedAt
+  tenant                 Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   department             Department? @relation(fields: [departmentId], references: [id])
   user                   User?       @relation(fields: [userId], references: [id])
   contact                Contact?    @relation(fields: [contactId], references: [id])
@@ -622,6 +808,7 @@ model JobOpening {
   description   String?
   status        String      @default("open")
   createdAt     DateTime    @default(now())
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
   departmentRef Department? @relation(fields: [departmentId], references: [id])
   applicants    Applicant[]
 

@@ -14,6 +14,118 @@ $dockerConfig = Join-Path $env:TEMP 'deska-docker-config'
 New-Item -ItemType Directory -Force -Path $dockerConfig | Out-Null
 $env:DOCKER_CONFIG = $dockerConfig
 
+function Read-DotEnvValues {
+    $values = @{}
+    $envFile = Join-Path $root '.env'
+    if (-not (Test-Path $envFile)) { return $values }
+
+    foreach ($line in Get-Content -LiteralPath $envFile) {
+        if ($line -match '^\s*([^#][A-Z0-9_]*)\s*=\s*(.*)$') {
+            $values[$Matches[1]] = $Matches[2].Trim().Trim('"').Trim("'")
+        }
+    }
+    return $values
+}
+
+function Set-DotEnvValue {
+    param(
+        [string]$Key,
+        [string]$Value
+    )
+
+    $envFile = Join-Path $root '.env'
+    $lines = [System.Collections.Generic.List[string]]::new()
+    if (Test-Path $envFile) {
+        foreach ($line in Get-Content -LiteralPath $envFile) { $lines.Add($line) }
+    }
+
+    $updated = $false
+    for ($index = 0; $index -lt $lines.Count; $index++) {
+        if ($lines[$index] -match "^\s*$([regex]::Escape($Key))\s*=") {
+            $lines[$index] = "$Key=$Value"
+            $updated = $true
+            break
+        }
+    }
+    if (-not $updated) { $lines.Add("$Key=$Value") }
+    Set-Content -LiteralPath $envFile -Value $lines -Encoding UTF8
+}
+
+function New-DevelopmentSecret {
+    $bytes = New-Object byte[] 32
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($bytes)
+    } finally {
+        $generator.Dispose()
+    }
+    return [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
+}
+
+function Ensure-ComposeEnvironment {
+    $values = Read-DotEnvValues
+    $databaseUrl = [string]$values['DATABASE_URL']
+    $postgresPassword = [string]$values['POSTGRES_PASSWORD']
+    $placeholderPassword = [string]::IsNullOrWhiteSpace($postgresPassword) -or $postgresPassword -like 'replace-with-*'
+
+    if ($placeholderPassword) {
+        $urlPassword = ''
+        if ($databaseUrl -match '^postgresql://[^:]+:([^@]+)@') {
+            $urlPassword = [Uri]::UnescapeDataString($Matches[1])
+        }
+        if ([string]::IsNullOrWhiteSpace($urlPassword) -or $urlPassword -like 'replace-with-*') {
+            $postgresPassword = New-DevelopmentSecret
+            if ([string]::IsNullOrWhiteSpace($databaseUrl)) {
+                $databaseUrl = "postgresql://deska:$postgresPassword@localhost:5433/deska_erp"
+            } elseif ($databaseUrl -match '^(postgresql://[^:]+:)[^@]+(@.*)$') {
+                $databaseUrl = "$($Matches[1])$postgresPassword$($Matches[2])"
+            }
+            Set-DotEnvValue -Key 'DATABASE_URL' -Value $databaseUrl
+        } else {
+            # Preserve compatibility with an existing development volume by
+            # deriving the missing Compose value from its working URL.
+            $postgresPassword = $urlPassword
+        }
+        Set-DotEnvValue -Key 'POSTGRES_PASSWORD' -Value $postgresPassword
+        Write-Host 'POSTGRES_PASSWORD was synchronized in .env for Docker Compose.' -ForegroundColor Yellow
+        $values = Read-DotEnvValues
+    }
+
+    $databaseUrl = [string]$values['DATABASE_URL']
+    $postgresPassword = [string]$values['POSTGRES_PASSWORD']
+    if ([string]::IsNullOrWhiteSpace($databaseUrl) -or $databaseUrl -like '*replace-with-*') {
+        $encodedPassword = [Uri]::EscapeDataString($postgresPassword)
+        Set-DotEnvValue -Key 'DATABASE_URL' -Value "postgresql://deska:$encodedPassword@localhost:5433/deska_erp"
+        Write-Host 'DATABASE_URL was synchronized in .env for local PostgreSQL.' -ForegroundColor Yellow
+        $values = Read-DotEnvValues
+    }
+
+    $jwtSecret = [string]$values['JWT_SECRET']
+    if ([string]::IsNullOrWhiteSpace($jwtSecret) -or $jwtSecret -like 'replace-with-*') {
+        Set-DotEnvValue -Key 'JWT_SECRET' -Value (New-DevelopmentSecret)
+        Write-Host 'A development JWT_SECRET was generated in .env.' -ForegroundColor Yellow
+        $values = Read-DotEnvValues
+    }
+    $settingsKey = [string]$values['SETTINGS_ENCRYPTION_KEY']
+    if ([string]::IsNullOrWhiteSpace($settingsKey) -or $settingsKey -like 'replace-with-*') {
+        Set-DotEnvValue -Key 'SETTINGS_ENCRYPTION_KEY' -Value (New-DevelopmentSecret)
+        Write-Host 'A development SETTINGS_ENCRYPTION_KEY was generated in .env.' -ForegroundColor Yellow
+        $values = Read-DotEnvValues
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$values['CORS_ORIGIN'])) {
+        Set-DotEnvValue -Key 'CORS_ORIGIN' -Value 'http://localhost:3000'
+        $values = Read-DotEnvValues
+    }
+
+    # Explicitly export Compose inputs so nested cmd.exe invocations receive
+    # the same values without ever printing credentials.
+    foreach ($key in @('POSTGRES_PASSWORD', 'JWT_SECRET', 'CORS_ORIGIN', 'SETTINGS_ENCRYPTION_KEY', 'TRUST_PROXY_HOPS')) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$values[$key])) {
+            Set-Item -LiteralPath "Env:$key" -Value ([string]$values[$key])
+        }
+    }
+}
+
 function Read-DatabaseUrl {
     $envFile = Join-Path $root '.env'
     if (Test-Path $envFile) {
@@ -312,12 +424,21 @@ if (-not (Test-Path '.env')) {
     Write-Host '.env created from .env.example' -ForegroundColor Yellow
 }
 
+Ensure-ComposeEnvironment
+
 Stop-DevelopmentProcesses
 Stop-DockerAppServices
 Stop-PortListeners -Ports @(3000, 3001)
 Reset-DevelopmentLogs
 
 $env:DATABASE_URL = Ensure-Postgres
+
+Write-Host 'Generating Prisma client for the local PostgreSQL engine...' -ForegroundColor Yellow
+# Always regenerate with the regular query engine. A previous build may have
+# used `prisma generate --no-engine`, which is only valid for Prisma Accelerate
+# and makes the local API fail with a misleading prisma:// URL error.
+& "$root\apps\api\node_modules\.bin\prisma.cmd" generate --schema "$root\apps\api\prisma\schema.prisma"
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if (-not $SkipMigrate) {
     Write-Host 'Syncing database schema...' -ForegroundColor Yellow
@@ -333,8 +454,6 @@ if (-not $SkipSeed) {
 
 Write-Host 'Building packages...' -ForegroundColor Yellow
 & "$root\packages\shared\node_modules\.bin\tsc.cmd" -p "$root\packages\shared\tsconfig.json"
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-& "$root\packages\module-sdk\node_modules\.bin\tsc.cmd" -p "$root\packages\module-sdk\tsconfig.json"
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($FreshWebCache) {
@@ -352,16 +471,14 @@ Write-Host 'Open:  http://localhost:3000/login' -ForegroundColor DarkGray
 Write-Host ''
 
 $sharedWatchCommand = "Set-Location '$root'; `$env:CHOKIDAR_USEPOLLING='true'; .\packages\shared\node_modules\.bin\tsc.cmd -p .\packages\shared\tsconfig.json --watch --preserveWatchOutput"
-$sdkWatchCommand = "Set-Location '$root'; `$env:CHOKIDAR_USEPOLLING='true'; .\packages\module-sdk\node_modules\.bin\tsc.cmd -p .\packages\module-sdk\tsconfig.json --watch --preserveWatchOutput"
 $apiCommand = "Set-Location '$root\apps\api'; `$env:DATABASE_URL='$env:DATABASE_URL'; `$env:NODE_ENV='development'; `$env:CHOKIDAR_USEPOLLING='true'; `$env:WATCHPACK_POLLING='true'; .\node_modules\.bin\nest.cmd start --watch"
 $webCommand = "Set-Location '$root\apps\web'; `$env:NODE_ENV='development'; `$env:CHOKIDAR_USEPOLLING='true'; `$env:WATCHPACK_POLLING='true'; .\node_modules\.bin\next.cmd dev --port 3000"
 $sharedProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',$sharedWatchCommand -RedirectStandardOutput "$root\deska-shared.log" -RedirectStandardError "$root\deska-shared.err.log" -PassThru
-$sdkProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',$sdkWatchCommand -RedirectStandardOutput "$root\deska-sdk.log" -RedirectStandardError "$root\deska-sdk.err.log" -PassThru
 $apiProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',$apiCommand -RedirectStandardOutput "$root\deska-api.log" -RedirectStandardError "$root\deska-api.err.log" -PassThru
 $webProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',$webCommand -RedirectStandardOutput "$root\deska-web.log" -RedirectStandardError "$root\deska-web.err.log" -PassThru
 
 @{
-    processes = @($sharedProcess, $sdkProcess, $apiProcess, $webProcess) | ForEach-Object {
+    processes = @($sharedProcess, $apiProcess, $webProcess) | ForEach-Object {
         @{ id = $_.Id; startedAt = $_.StartTime.ToUniversalTime().ToString('o') }
     }
 } | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $processStatePath -Encoding UTF8
@@ -371,7 +488,13 @@ for ($attempt = 1; $attempt -le 30; $attempt++) {
         Write-Host 'Hot reload is active. Changes are picked up automatically.' -ForegroundColor Green
         exit 0
     }
+    if ($apiProcess.HasExited -or $webProcess.HasExited) {
+        $failedServices = @()
+        if ($apiProcess.HasExited) { $failedServices += 'API' }
+        if ($webProcess.HasExited) { $failedServices += 'Web' }
+        throw "Startup failed: $($failedServices -join ' و ') process exited. Logs: deska-api.log / deska-api.err.log / deska-web.log / deska-web.err.log"
+    }
     Start-Sleep -Seconds 1
 }
 
-Write-Host 'Services are starting in the background. Check deska-api.log and deska-web.log if the browser is not ready yet.' -ForegroundColor Yellow
+throw 'Startup timed out: API or Web did not start listening within 30 seconds. Check deska-api.log, deska-api.err.log, deska-web.log and deska-web.err.log.'

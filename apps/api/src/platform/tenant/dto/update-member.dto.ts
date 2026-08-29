@@ -27,7 +27,8 @@ export class UpdateMemberDto extends EmployeeProfileFieldsDto {
 
   @IsOptional()
   @IsString()
-  @MinLength(8, { message: 'رمز عبور باید حداقل ۸ کاراکتر باشد' })
+  @MinLength(12, { message: 'رمز عبور باید حداقل ۱۲ کاراکتر باشد' })
+  @MaxLength(128)
   password?: string;
 
   @IsOptional()

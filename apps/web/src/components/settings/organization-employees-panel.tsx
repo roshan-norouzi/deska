@@ -31,7 +31,6 @@ import {
 } from '@/components/ui/table'
 import { useApi } from '@/hooks/use-api'
 import { useAuth } from '@/lib/auth-context'
-import { formatJalaliDate } from '@/lib/date'
 import { apiFetch } from '@/lib/utils'
 
 interface MemberUser {
@@ -80,6 +79,15 @@ export interface OrganizationMember {
 interface DepartmentOption {
   id: string
   name: string
+}
+
+interface OrganizationInvitation {
+  id: string
+  email: string
+  role: string
+  status: string
+  expiresAt: string
+  createdAt: string
 }
 
 interface OrganizationEmployeesPanelProps {
@@ -200,9 +208,13 @@ export function OrganizationEmployeesPanel({
     tenantId && (memberRole === TENANT_ROLES.OWNER || memberRole === TENANT_ROLES.ADMIN)
       ? `/tenants/${tenantId}/departments`
       : null
+  const invitationsPath = tenantId && (memberRole === TENANT_ROLES.OWNER || memberRole === TENANT_ROLES.ADMIN)
+    ? `/tenants/${tenantId}/invitations`
+    : null
 
   const { data, isLoading, error, refetch } = useApi<OrganizationMember[]>(membersPath)
   const { data: departmentsData } = useApi<DepartmentOption[]>(departmentsPath)
+  const { data: invitationData, refetch: refetchInvitations } = useApi<OrganizationInvitation[]>(invitationsPath)
 
   const [modalMode, setModalMode] = useState<MemberModalMode | null>(null)
   const [editingMember, setEditingMember] = useState<OrganizationMember | null>(null)
@@ -216,6 +228,7 @@ export function OrganizationEmployeesPanel({
 
   const members = Array.isArray(data) ? data : []
   const departments = Array.isArray(departmentsData) ? departmentsData : []
+  const invitations = Array.isArray(invitationData) ? invitationData : []
   const canManage = memberRole === TENANT_ROLES.OWNER || memberRole === TENANT_ROLES.ADMIN
 
   useEffect(() => {
@@ -260,10 +273,8 @@ export function OrganizationEmployeesPanel({
       errors.email = 'ایمیل معتبر نیست'
     }
 
-    if (modalMode === 'add' && (!form.password || form.password.length < 8)) {
-      errors.password = 'رمز عبور باید حداقل ۸ کاراکتر باشد'
-    } else if (form.password && form.password.length < 8) {
-      errors.password = 'رمز عبور باید حداقل ۸ کاراکتر باشد'
+    if (form.password && form.password.length < 12) {
+      errors.password = 'رمز عبور باید حداقل ۱۲ کاراکتر باشد'
     }
 
     setFieldErrors(errors)
@@ -284,11 +295,11 @@ export function OrganizationEmployeesPanel({
 
     try {
       if (modalMode === 'add') {
-        await apiFetch(`/tenants/${tenantId}/invite`, {
+        const invitation = await apiFetch<{ token?: string }>(`/tenants/${tenantId}/invite`, {
           method: 'POST',
           body: {
             email: formState.email.trim(),
-            password: formState.password,
+            ...(formState.password ? { password: formState.password } : {}),
             role: formState.role,
             ...(employeeCode ? { employeeCode } : {}),
             ...(jobTitle ? { jobTitle } : {}),
@@ -297,6 +308,11 @@ export function OrganizationEmployeesPanel({
             ...profile,
           },
         })
+        if (invitation?.token) {
+          const inviteUrl = `${window.location.origin}/invitations/accept?token=${encodeURIComponent(invitation.token)}`
+          await navigator.clipboard?.writeText(inviteUrl)
+          window.alert('دعوت‌نامه ساخته شد و لینک پذیرش در کلیپ‌بورد کپی شد.')
+        }
       } else if (editingMember) {
         await apiFetch(`/tenants/${tenantId}/members/${editingMember.userId}`, {
           method: 'PATCH',
@@ -315,11 +331,27 @@ export function OrganizationEmployeesPanel({
       }
       closeModal()
       await refetch()
+      await refetchInvitations()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'خطا در ذخیره')
     } finally {
       setSaving(false)
     }
+  }
+
+  const revokeInvitation = async (id: string) => {
+    if (!tenantId || !window.confirm('این دعوت‌نامه لغو شود؟')) return
+    await apiFetch(`/tenants/${tenantId}/invitations/${id}`, { method: 'DELETE' })
+    await refetchInvitations()
+  }
+
+  const resendInvitation = async (id: string) => {
+    if (!tenantId) return
+    const result = await apiFetch<{ token: string }>(`/tenants/${tenantId}/invitations/${id}/resend`, { method: 'POST' })
+    const inviteUrl = `${window.location.origin}/invitations/accept?token=${encodeURIComponent(result.token)}`
+    await navigator.clipboard?.writeText(inviteUrl)
+    window.alert('لینک تازه دعوت در کلیپ‌بورد کپی شد.')
+    await refetchInvitations()
   }
 
   const handleDeleteMember = async (member: OrganizationMember) => {
@@ -412,7 +444,7 @@ export function OrganizationEmployeesPanel({
                     <TableCell>
                       <div className="flex flex-wrap items-center gap-1">
                         {member.employee?.id && (
-                          <Link href={`/hr/employees/${member.employee.id}`}>
+                          <Link href={`/employees/${member.employee.id}`}>
                             <Button variant="outline" size="sm">
                               <ExternalLink className="h-3.5 w-3.5" />
                               پروفایل
@@ -443,6 +475,19 @@ export function OrganizationEmployeesPanel({
             )}
           </TableBody>
         </Table>
+      )}
+
+      {canManage && invitations.length > 0 && (
+        <section className="space-y-3 rounded-xl border border-slate-200 p-4">
+          <h3 className="font-semibold text-slate-900">دعوت‌نامه‌ها</h3>
+          {invitations.map((invitation) => (
+            <div key={invitation.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm">
+              <span className="min-w-0 flex-1" dir="ltr">{invitation.email}</span>
+              <Badge variant={invitation.status === 'pending' ? 'warning' : invitation.status === 'accepted' ? 'success' : 'default'}>{invitation.status}</Badge>
+              {invitation.status === 'pending' && <><Button size="sm" variant="outline" onClick={() => void resendInvitation(invitation.id)}>ارسال مجدد</Button><Button size="sm" variant="danger" onClick={() => void revokeInvitation(invitation.id)}>لغو</Button></>}
+            </div>
+          ))}
+        </section>
       )}
 
       {modalMode && formState && (

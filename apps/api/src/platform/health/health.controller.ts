@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { Public } from '../../common/decorators/metadata.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -9,20 +9,18 @@ export class HealthController {
   @Public()
   @Get()
   async check() {
-    let dbStatus = 'ok';
-
     try {
       await this.prisma.$queryRaw`SELECT 1`;
     } catch {
-      dbStatus = 'error';
+      throw new ServiceUnavailableException('پایگاه داده در دسترس نیست');
     }
 
     return {
-      status: dbStatus === 'ok' ? 'ok' : 'degraded',
+      status: 'ok',
       version: process.env.APP_VERSION ?? '1.0.0',
       timestamp: new Date().toISOString(),
       services: {
-        database: dbStatus,
+        database: 'ok',
       },
     };
   }

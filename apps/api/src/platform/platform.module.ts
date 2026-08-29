@@ -5,6 +5,7 @@ import { ModulesModule } from './modules/modules.module';
 import { RolesModule } from './roles/roles.module';
 import { TenantModule } from './tenant/tenant.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { PlatformAdminModule } from './admin/platform-admin.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     ModulesModule,
     HealthModule,
     NotificationsModule,
+    PlatformAdminModule,
   ],
   exports: [
     AuthModule,

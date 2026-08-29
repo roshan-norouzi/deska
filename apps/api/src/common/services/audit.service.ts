@@ -79,17 +79,17 @@ export class NotificationService {
     return this.prisma.notification.create({ data: params });
   }
 
-  async list(userId: string, unreadOnly = false) {
+  async list(tenantId: string, userId: string, unreadOnly = false) {
     return this.prisma.notification.findMany({
-      where: { userId, ...(unreadOnly ? { isRead: false } : {}) },
+      where: { tenantId, userId, ...(unreadOnly ? { isRead: false } : {}) },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
   }
 
-  async markRead(id: string, userId: string) {
+  async markRead(tenantId: string, id: string, userId: string) {
     return this.prisma.notification.updateMany({
-      where: { id, userId },
+      where: { id, tenantId, userId },
       data: { isRead: true },
     });
   }

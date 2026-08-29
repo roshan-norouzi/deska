@@ -8,7 +8,6 @@ import {
   ORGANIZATIONAL_ROLES,
   STATUS_LABELS,
   TENANT_ROLE_LABELS,
-  TENANT_ROLES,
   pickProvidedProfileFields,
   type EmployeeProfileField,
 } from '@deska/shared'
@@ -332,14 +331,13 @@ export function EmployeeMemberFormFields({
             required={mode === 'add'}
           />
           <Input
-            label={mode === 'add' ? 'رمز عبور' : 'رمز عبور جدید (اختیاری)'}
+            label={mode === 'add' ? 'رمز عبور اولیه (اختیاری)' : 'رمز عبور جدید (اختیاری)'}
             type="password"
             value={formState.password}
             onChange={(e) => set('password', e.target.value)}
             error={fieldErrors.password}
-            placeholder="حداقل ۸ کاراکتر"
-            minLength={8}
-            required={mode === 'add'}
+            placeholder="در صورت خالی بودن، دعوت‌نامه ساخته می‌شود"
+            minLength={12}
             autoComplete={mode === 'add' ? 'new-password' : 'off'}
           />
         </div>

@@ -53,15 +53,44 @@ API در اولین راه‌اندازی تا آماده‌شدن کامل Post
 ```nginx
 server {
     server_name pixad.ir www.pixad.ir;
-    location / {
-        proxy_pass http://127.0.0.1:3000;
+    # API must be matched before the general /deska/ location. The prefix
+    # replacement keeps Nest's /api global prefix intact.
+    location ^~ /deska/api/ {
+        proxy_pass http://127.0.0.1:3001/api/;
+        proxy_http_version 1.1;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /deska;
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
+    }
+
+    location = /deska {
+        return 301 /deska/;
+    }
+
+    location ^~ /deska/ {
+        proxy_pass http://127.0.0.1:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Prefix /deska;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 120s;
+        proxy_send_timeout 120s;
     }
 }
 ```
+
+در این پیکربندی، درخواست مرورگر به
+`/deska/api/auth/login` مستقیماً به `/api/auth/login` در سرویس API می‌رسد؛
+بنابراین نام داخلی Docker (`api`) هرگز به مرورگر ارسال نمی‌شود. پس از ذخیره
+تنظیمات، در پنل سرور گزینهٔ تست و سپس Reload سرویس Nginx را اجرا کنید.
 
 ## ارتقا بدون تغییر داده‌ها
 

@@ -21,7 +21,7 @@ export class DashboardService {
 
     return {
       contacts,
-      hr: { employees },
+      employees: { active: employees },
       core: { upcomingEvents },
       generatedAt: now.toISOString(),
     };

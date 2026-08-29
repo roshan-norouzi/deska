@@ -21,7 +21,7 @@ export function DepartmentSelectField({
   onChange,
   required,
 }: DepartmentSelectFieldProps) {
-  const { data, isLoading } = useApi<unknown>('/hr/departments');
+  const { data, isLoading } = useApi<unknown>('/employees/departments');
   const departments = extractListItems<Department>(data);
 
   return (

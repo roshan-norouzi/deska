@@ -10,7 +10,12 @@ import {
   type ReactNode,
 } from 'react';
 import { PLATFORM_ROLES } from '@deska/shared';
-import { apiFetch, clearTokens, setTokens, type ApiFetchOptions } from './utils';
+import {
+  apiFetch,
+  clearTokens,
+  withBasePath,
+  type ApiFetchOptions,
+} from './utils';
 
 export interface AuthUser {
   id: string;
@@ -34,8 +39,15 @@ export interface TenantMembership {
 
 interface LoginResponse {
   user: AuthUser;
-  accessToken: string;
-  refreshToken: string;
+}
+
+interface RegisterInput {
+  name: string;
+  email: string;
+  phone?: string;
+  password: string;
+  confirmPassword: string;
+  acceptTerms: boolean;
 }
 
 interface AuthContextValue {
@@ -43,8 +55,10 @@ interface AuthContextValue {
   isLoading: boolean;
   isAuthenticated: boolean;
   isSuperAdmin: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  isPlatformAdmin: boolean;
+  login: (email: string, password: string) => Promise<AuthUser>;
+  register: (input: RegisterInput) => Promise<AuthUser>;
+  logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
 
@@ -66,31 +80,52 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const init = async () => {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('deska_access_token') : null;
-      if (token) {
-        await refresh();
-      }
+      clearTokens();
+      await refresh();
       setIsLoading(false);
     };
     void init();
   }, [refresh]);
 
   const login = useCallback(async (email: string, password: string) => {
-    const data = await apiFetch<LoginResponse>('/auth/login', {
+    await apiFetch<LoginResponse>('/auth/login', {
       method: 'POST',
       body: { email, password },
       skipAuth: true,
       skipTenant: true,
     });
 
-    setTokens(data.accessToken, data.refreshToken);
     const me = await apiFetch<AuthUser>('/auth/me');
     setUser(me);
+    return me;
   }, []);
 
-  const logout = useCallback(() => {
+  const register = useCallback(async (input: RegisterInput) => {
+    await apiFetch<LoginResponse>('/auth/register', {
+      method: 'POST',
+      body: input,
+      skipAuth: true,
+      skipTenant: true,
+    });
+
+    const me = await apiFetch<AuthUser>('/auth/me');
+    setUser(me);
+    return me;
+  }, []);
+
+  const logout = useCallback(async () => {
     clearTokens();
     setUser(null);
+    try {
+      await fetch(withBasePath('/api/auth/logout'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: '{}',
+      });
+    } catch {
+      // Local logout must still succeed when the API is temporarily unavailable.
+    }
   }, []);
 
   const value = useMemo(
@@ -99,11 +134,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isLoading,
       isAuthenticated: !!user,
       isSuperAdmin: user?.role === PLATFORM_ROLES.SUPER_ADMIN,
+      isPlatformAdmin:
+        user?.role === PLATFORM_ROLES.SUPER_ADMIN || user?.role === PLATFORM_ROLES.ADMIN,
       login,
+      register,
       logout,
       refresh,
     }),
-    [user, isLoading, login, logout, refresh],
+    [user, isLoading, login, register, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

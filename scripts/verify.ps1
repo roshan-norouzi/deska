@@ -4,7 +4,9 @@
 #   pwsh ./scripts/verify.ps1 -LiveOnly # runtime only (when dev servers are running)
 
 param(
-    [switch]$LiveOnly
+    [switch]$LiveOnly,
+    [string]$AdminEmail = $env:SEED_ADMIN_EMAIL,
+    [string]$AdminPassword = $env:SEED_ADMIN_PASSWORD
 )
 
 $ErrorActionPreference = 'Stop'
@@ -24,6 +26,9 @@ function Test-Step {
         Write-Host "  OK" -ForegroundColor Green
     } catch {
         Write-Host "  FAIL: $_" -ForegroundColor Red
+        if ($_.InvocationInfo.PositionMessage) {
+            Write-Host "  $($_.InvocationInfo.PositionMessage.Trim())" -ForegroundColor DarkRed
+        }
         $script:failed += $Name
     }
 }
@@ -33,6 +38,20 @@ function Test-PortInUse {
     $conn = Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
     return [bool]$conn
 }
+
+function Read-DotEnvValue {
+    param([string]$Key)
+    if (-not (Test-Path '.env')) { return '' }
+    foreach ($line in Get-Content -LiteralPath '.env') {
+        if ($line -match "^\s*$([regex]::Escape($Key))\s*=\s*(.*)$") {
+            return $Matches[1].Trim().Trim('"').Trim("'")
+        }
+    }
+    return ''
+}
+
+if ([string]::IsNullOrWhiteSpace($AdminEmail)) { $AdminEmail = Read-DotEnvValue 'SEED_ADMIN_EMAIL' }
+if ([string]::IsNullOrWhiteSpace($AdminPassword)) { $AdminPassword = Read-DotEnvValue 'SEED_ADMIN_PASSWORD' }
 
 if (-not $LiveOnly) {
     Test-Step "Typecheck" { pnpm typecheck | Out-Null }
@@ -64,55 +83,61 @@ Test-Step "Web /login (200)" {
 }
 
 Test-Step "Auth login + /me" {
-    $login = Invoke-RestMethod -Uri "http://localhost:3001/api/auth/login" -Method POST `
-        -ContentType "application/json" -Body '{"email":"admin@deska.local","password":"Admin@1234"}' -TimeoutSec 10
-    if (-not $login.accessToken) { throw "No access token" }
+    if ([string]::IsNullOrWhiteSpace($AdminEmail) -or [string]::IsNullOrWhiteSpace($AdminPassword)) {
+        throw 'Set SEED_ADMIN_EMAIL and SEED_ADMIN_PASSWORD in .env, or pass -AdminEmail and -AdminPassword'
+    }
+    $loginBody = @{ email = $AdminEmail; password = $AdminPassword } | ConvertTo-Json
+    $loginSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+    $loginResponse = Invoke-WebRequest -Uri "http://localhost:3001/api/auth/login" -Method POST `
+        -ContentType "application/json" -Body $loginBody -WebSession $loginSession -UseBasicParsing -TimeoutSec 10
+    $setCookies = @($loginResponse.Headers['Set-Cookie']) -join '; '
+    if ($setCookies -notmatch 'deska_access_token=' -or $setCookies -notmatch 'HttpOnly' -or $setCookies -notmatch 'SameSite=Lax') {
+        throw 'Secure authentication cookies were not returned'
+    }
     $me = Invoke-RestMethod -Uri "http://localhost:3001/api/auth/me" `
-        -Headers @{ Authorization = "Bearer $($login.accessToken)" } -TimeoutSec 10
+        -WebSession $loginSession -TimeoutSec 10
     if ($me.tenants.Count -lt 1) { throw "No tenants on /auth/me" }
-    $script:verifyToken = $login.accessToken
+    $script:verifySession = $loginSession
     $script:verifyTenant = $me.tenants[0].id
 }
 
-function Enable-VerifyModules {
-    param(
-        [hashtable]$Headers,
-        [string[]]$ModuleIds
-    )
-    foreach ($moduleId in $ModuleIds) {
-        $body = @{ enabled = $true } | ConvertTo-Json
-        Invoke-RestMethod -Uri "http://localhost:3001/api/modules/$moduleId/toggle" `
-            -Method PATCH -Headers $Headers -ContentType "application/json" -Body $body -TimeoutSec 10 | Out-Null
+Test-Step "Tenant core modules" {
+    $h = @{ "X-Tenant-Id" = $script:verifyTenant }
+    $mods = Invoke-RestMethod -Uri "http://localhost:3001/api/modules/tenant" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
+    if ($mods.Count -lt 1) { throw "Module catalog empty" }
+    foreach ($moduleId in @('contacts', 'documents', 'calendar', 'employees')) {
+        $coreModule = @($mods | Where-Object { $_.id -eq $moduleId -and $_.isCore -eq $true -and $_.enabled -eq $true })
+        if ($coreModule.Count -ne 1) { throw "Core module is not always enabled: $moduleId" }
     }
 }
 
-Test-Step "Tenant modules (opt-in)" {
-    $h = @{ Authorization = "Bearer $script:verifyToken"; "X-Tenant-Id" = $script:verifyTenant }
-    $mods = Invoke-RestMethod -Uri "http://localhost:3001/api/modules/tenant" -Headers $h -TimeoutSec 10
-    if ($mods.Count -lt 1) { throw "Module catalog empty" }
-    $enabledBefore = @($mods | Where-Object { $_.enabled -eq $true })
-    if ($enabledBefore.Count -gt 0) {
-        Write-Host "  Note: $($enabledBefore.Count) modules already enabled by tenant admin" -ForegroundColor DarkGray
+Test-Step "Cross-site write protection" {
+    $blocked = $false
+    try {
+        Invoke-WebRequest -Uri "http://localhost:3001/api/auth/logout" -Method POST `
+            -WebSession $script:verifySession -Headers @{ Origin = 'https://untrusted.invalid' } `
+            -ContentType 'application/json' -Body '{}' -UseBasicParsing -TimeoutSec 10 | Out-Null
+    } catch {
+        $statusCode = [int]$_.Exception.Response.StatusCode
+        if ($statusCode -eq 403) { $blocked = $true } else { throw }
     }
-    Enable-VerifyModules -Headers $h -ModuleIds @('contacts', 'documents', 'calendar', 'hr')
+    if (-not $blocked) { throw 'Authenticated cross-site write request was not blocked' }
 }
 
 Test-Step "Core module endpoints" {
-    $h = @{ Authorization = "Bearer $script:verifyToken"; "X-Tenant-Id" = $script:verifyTenant }
-    $contacts = Invoke-RestMethod -Uri "http://localhost:3001/api/contacts" -Headers $h -TimeoutSec 10
+    $h = @{ "X-Tenant-Id" = $script:verifyTenant }
+    $contacts = Invoke-RestMethod -Uri "http://localhost:3001/api/contacts" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
     if ($null -eq $contacts.items) { throw "Contacts response invalid" }
-    $null = Invoke-RestMethod -Uri "http://localhost:3001/api/documents/folders" -Headers $h -TimeoutSec 10
-    $null = Invoke-RestMethod -Uri "http://localhost:3001/api/calendar/events" -Headers $h -TimeoutSec 10
-    $dashboard = Invoke-RestMethod -Uri "http://localhost:3001/api/dashboard/stats" -Headers $h -TimeoutSec 10
+    $null = Invoke-RestMethod -Uri "http://localhost:3001/api/documents/folders" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
+    $null = Invoke-RestMethod -Uri "http://localhost:3001/api/calendar/events" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
+    $employees = Invoke-RestMethod -Uri "http://localhost:3001/api/employees" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
+    $null = Invoke-RestMethod -Uri "http://localhost:3001/api/employees/departments" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
+    if ($employees.Count -gt 0) {
+        $profile = Invoke-RestMethod -Uri "http://localhost:3001/api/employees/$($employees[0].id)/profile" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
+        if ($null -eq $profile.employee) { throw "Employee profile response invalid" }
+    }
+    $dashboard = Invoke-RestMethod -Uri "http://localhost:3001/api/dashboard/stats" -WebSession $script:verifySession -Headers $h -TimeoutSec 10
     if ($null -eq $dashboard.contacts) { throw "Dashboard response invalid" }
-}
-
-Test-Step "HR module endpoints" {
-    $h = @{ Authorization = "Bearer $script:verifyToken"; "X-Tenant-Id" = $script:verifyTenant }
-    $depts = Invoke-RestMethod -Uri "http://localhost:3001/api/hr/departments" -Headers $h -TimeoutSec 10
-    $employees = Invoke-RestMethod -Uri "http://localhost:3001/api/hr/employees" -Headers $h -TimeoutSec 10
-    if ($null -eq $depts -or $null -eq $employees) { throw "HR list response invalid" }
-    $null = Invoke-RestMethod -Uri "http://localhost:3001/api/hr/dashboard" -Headers $h -TimeoutSec 10
 }
 
 Write-Host "`n=== Summary ===" -ForegroundColor Cyan

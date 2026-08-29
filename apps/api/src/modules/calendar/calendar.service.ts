@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { RECURRENCE_CALENDAR } from '@deska/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 import { syncAllContactCalendarEvents } from '../contacts/contact-calendar-sync';
-import { syncAllEmployeeCalendarEvents } from '../hr/employee-calendar-sync';
+import { syncAllEmployeeCalendarEvents } from '../../platform/tenant/employee-calendar-sync';
 
 export interface CalendarEventInput {
   title: string;
@@ -203,7 +203,12 @@ export class CalendarService {
     return this.prisma.calendarEvent.delete({ where: { id } });
   }
 
-  async updateAttendeeStatus(eventId: string, attendeeId: string, status: string) {
+  async updateAttendeeStatus(tenantId: string, eventId: string, attendeeId: string, status: string) {
+    const attendee = await this.prisma.calendarEventAttendee.findFirst({
+      where: { id: attendeeId, eventId, event: { tenantId } },
+      select: { id: true },
+    });
+    if (!attendee) throw new NotFoundException('شرکت‌کننده رویداد یافت نشد');
     return this.prisma.calendarEventAttendee.update({
       where: { id: attendeeId },
       data: { status },

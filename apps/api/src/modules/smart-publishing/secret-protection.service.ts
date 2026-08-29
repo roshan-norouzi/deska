@@ -1,13 +1,27 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
 
 const PREFIX = 'enc:v1:';
 
 @Injectable()
 export class SecretProtectionService {
-  private readonly key = createHash('sha256')
-    .update(process.env.SETTINGS_ENCRYPTION_KEY || process.env.JWT_SECRET || 'deska-development-secret')
-    .digest();
+  private readonly key: Buffer;
+
+  constructor(config: ConfigService) {
+    const explicitKey = config.get<string>('SETTINGS_ENCRYPTION_KEY')?.trim();
+    const production = config.get<string>('NODE_ENV') === 'production' || process.env.NODE_ENV === 'production';
+    if (production && !explicitKey) {
+      throw new Error('SETTINGS_ENCRYPTION_KEY is required in production');
+    }
+    const configured = explicitKey
+      || config.get<string>('JWT_SECRET')
+      || 'deska-development-secret';
+    if (!configured) {
+      throw new Error('SETTINGS_ENCRYPTION_KEY is required');
+    }
+    this.key = createHash('sha256').update(configured).digest();
+  }
 
   encrypt(value: string): string {
     if (!value || value.startsWith(PREFIX)) return value;

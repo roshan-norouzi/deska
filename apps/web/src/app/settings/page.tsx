@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { useTenant } from '@/lib/tenant-context'
 import { useApi } from '@/hooks/use-api'
 import { apiFetch } from '@/lib/utils'
+import { formatPersianDigits } from '@deska/shared'
 
 interface TenantDetail {
   id: string
@@ -81,7 +82,7 @@ function SettingsContent() {
               <Input label="پلن" value={tenant?.plan ?? ''} disabled />
               <Input
                 label="تعداد کارمندان"
-                value={data?._count?.members != null ? String(data._count.members) : '—'}
+                value={data?._count?.members != null ? formatPersianDigits(String(data._count.members)) : '—'}
                 disabled
               />
             </div>
