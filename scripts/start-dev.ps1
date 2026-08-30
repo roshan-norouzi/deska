@@ -482,10 +482,14 @@ Write-Host 'Building packages...' -ForegroundColor Yellow
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 if ($FreshWebCache) {
-    $nextDir = Join-Path $root 'apps/web/.next'
-    if (Test-Path $nextDir) {
-        Write-Host 'Removing stale Next.js cache...' -ForegroundColor Yellow
-        Remove-Item -Recurse -Force $nextDir
+    foreach ($nextDir in @(
+        (Join-Path $root 'apps/web/.next-dev'),
+        (Join-Path $root 'apps/web/.next')
+    )) {
+        if (Test-Path $nextDir) {
+            Write-Host "Removing stale Next.js cache: $nextDir" -ForegroundColor Yellow
+            Remove-Item -Recurse -Force $nextDir
+        }
     }
 }
 

@@ -5,7 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MODULE_CATALOG, TENANT_ROLES, normalizeDigits, normalizeEmployeeProfile, pickProvidedProfileFields, type EmployeeProfileInput } from '@deska/shared';
+import { MODULE_CATALOG, TENANT_ROLES, normalizeDigits } from '@deska/shared';
 import { createHash, randomBytes } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -14,12 +14,8 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { UpdateEmployeeCodeSettingsDto } from './dto/update-employee-code-settings.dto';
 import { ensureEmployeeForUser, syncTenantMemberEmployees } from './tenant-employee-sync';
-import {
-  applyEmployeeProfileToUpdate,
-  assertUniqueNationalId,
-  assertValidEmployeeProfile,
-} from './employee-profile.helper';
 import { serializeEmployeeForApi } from './employee-profile-backfill';
 
 type InvitationWithTenant = Prisma.TenantInvitationGetPayload<{ include: { tenant: true } }>;
@@ -27,9 +23,8 @@ type InvitationWithTenant = Prisma.TenantInvitationGetPayload<{ include: { tenan
 interface InvitationEmployeeMetadata {
   employeeCode?: string | null;
   jobTitle?: string | null;
-  departmentId?: string | null;
+  status?: string | null;
   hireDate?: string | null;
-  profile?: EmployeeProfileInput;
 }
 
 @Injectable()
@@ -124,6 +119,17 @@ export class TenantService {
         });
       }
 
+      await tx.numberSequence.create({
+        data: {
+          tenantId: created.id,
+          code: 'employee',
+          prefix: 'EMP-',
+          suffix: '',
+          nextNumber: 1,
+          padding: 4,
+        },
+      });
+
       await tx.auditLog.create({
         data: {
           tenantId: created.id,
@@ -178,6 +184,34 @@ export class TenantService {
           settings: dto.settings as Prisma.InputJsonValue,
         }),
       },
+    });
+  }
+
+  async getEmployeeCodeSettings(tenantId: string, memberRole: string) {
+    this.assertAdmin(memberRole);
+    const sequence = await this.prisma.numberSequence.upsert({
+      where: { tenantId_code: { tenantId, code: 'employee' } },
+      create: { tenantId, code: 'employee', prefix: 'EMP-', suffix: '', nextNumber: 1, padding: 4 },
+      update: {},
+      select: { prefix: true, suffix: true, padding: true },
+    });
+    return sequence;
+  }
+
+  async updateEmployeeCodeSettings(
+    tenantId: string,
+    dto: UpdateEmployeeCodeSettingsDto,
+    memberRole: string,
+  ) {
+    this.assertAdmin(memberRole);
+    const current = await this.getEmployeeCodeSettings(tenantId, memberRole);
+    return this.prisma.numberSequence.update({
+      where: { tenantId_code: { tenantId, code: 'employee' } },
+      data: {
+        prefix: dto.prefix ?? current.prefix,
+        suffix: dto.suffix ?? current.suffix,
+      },
+      select: { prefix: true, suffix: true, padding: true },
     });
   }
 
@@ -292,17 +326,6 @@ export class TenantService {
     });
     if (membership) throw new ConflictException('این کاربر قبلاً عضو سازمان است');
 
-    const providedProfile = pickProvidedProfileFields(dto);
-    assertValidEmployeeProfile(providedProfile, { requireAll: false });
-
-    if (dto.departmentId) {
-      const department = await this.prisma.department.findFirst({
-        where: { id: dto.departmentId, tenantId },
-        select: { id: true },
-      });
-      if (!department) throw new NotFoundException('واحد سازمانی یافت نشد');
-    }
-
     if (dto.employeeCode?.trim()) {
       const duplicateCode = await this.prisma.employee.findFirst({
         where: { tenantId, employeeCode: dto.employeeCode.trim() },
@@ -342,9 +365,8 @@ export class TenantService {
         metadata: {
           employeeCode: dto.employeeCode?.trim() || null,
           jobTitle: dto.jobTitle?.trim() || null,
-          departmentId: dto.departmentId || null,
+          status: dto.status || 'active',
           hireDate: dto.hireDate || null,
-          profile: providedProfile,
         } as unknown as Prisma.InputJsonValue,
       },
     });
@@ -515,18 +537,11 @@ export class TenantService {
     employeeId: string,
   ) {
     const metadata = (invitation.metadata ?? {}) as unknown as InvitationEmployeeMetadata;
-    const profile = metadata.profile ?? {};
     const update: Prisma.EmployeeUpdateInput = {};
 
-    if (Object.keys(profile).length > 0) {
-      assertValidEmployeeProfile(profile, { requireAll: false });
-      const normalized = normalizeEmployeeProfile(profile);
-      await assertUniqueNationalId(prisma, invitation.tenantId, normalized.nationalId, employeeId);
-      applyEmployeeProfileToUpdate(profile, update);
-    }
     if (metadata.employeeCode) update.employeeCode = metadata.employeeCode;
     if (metadata.jobTitle) update.jobTitle = metadata.jobTitle;
-    if (metadata.departmentId) update.department = { connect: { id: metadata.departmentId } };
+    if (metadata.status) update.status = metadata.status;
     if (metadata.hireDate) update.hireDate = new Date(metadata.hireDate);
 
     if (Object.keys(update).length > 0) {
@@ -647,15 +662,6 @@ export class TenantService {
       throw new ForbiddenException('امکان تعیین نقش مالک از این مسیر وجود ندارد');
     }
 
-    if (dto.departmentId) {
-      const department = await this.prisma.department.findFirst({
-        where: { id: dto.departmentId, tenantId },
-      });
-      if (!department) {
-        throw new NotFoundException('واحد سازمانی یافت نشد');
-      }
-    }
-
     if (dto.employeeCode) {
       const duplicateCode = await this.prisma.employee.findFirst({
         where: {
@@ -683,30 +689,13 @@ export class TenantService {
       member.joinedAt,
     );
 
-    const providedProfile = pickProvidedProfileFields(dto);
-
-    if (Object.keys(providedProfile).length > 0) {
-      assertValidEmployeeProfile(providedProfile, { requireAll: false });
-      const normalized = normalizeEmployeeProfile(providedProfile);
-      await assertUniqueNationalId(this.prisma, tenantId, normalized.nationalId, employee.id);
-    }
-
     const employeeUpdate: Prisma.EmployeeUpdateInput = {};
-
-    if (Object.keys(providedProfile).length > 0) {
-      applyEmployeeProfileToUpdate(providedProfile, employeeUpdate);
-    }
 
     if (dto.employeeCode !== undefined) {
       employeeUpdate.employeeCode = dto.employeeCode;
     }
     if (dto.jobTitle !== undefined) {
       employeeUpdate.jobTitle = dto.jobTitle || null;
-    }
-    if (dto.departmentId !== undefined) {
-      employeeUpdate.department = dto.departmentId
-        ? { connect: { id: dto.departmentId } }
-        : { disconnect: true };
     }
     if (dto.status !== undefined) {
       employeeUpdate.status = dto.status;

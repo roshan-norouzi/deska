@@ -9,12 +9,9 @@ import {
   TENANT_ROLE_LABELS,
   TENANT_ROLES,
   formatEmployeeFullName,
-  splitPersianFullName,
-  validateEmployeeProfile,
 } from '@deska/shared'
 import {
   EmployeeMemberFormFields,
-  buildProfilePayload,
   type EmployeeMemberFormState,
 } from '@/components/settings/employee-member-form-fields'
 import { Badge } from '@/components/ui/badge'
@@ -76,11 +73,6 @@ export interface OrganizationMember {
   employee: EmployeeInfo | null
 }
 
-interface DepartmentOption {
-  id: string
-  name: string
-}
-
 interface OrganizationInvitation {
   id: string
   email: string
@@ -115,29 +107,9 @@ const EMPLOYEE_STATUS_LABELS: Record<string, string> = {
 }
 
 const EMPTY_FORM: EmployeeMemberFormState = {
-  firstName: '',
-  lastName: '',
-  nationalId: '',
-  fatherName: '',
-  motherName: '',
-  birthCertificateNumber: '',
-  birthCertificateDate: '',
-  birthDate: '',
-  maritalStatus: '',
-  address: '',
-  postalCode: '',
-  mobilePhone: '',
-  landlinePhone: '',
-  bankAccountNumber: '',
-  bankCardNumber: '',
-  iban: '',
-  bankName: '',
-  insuranceNumber: '',
-  email: '',
   role: TENANT_ROLES.MEMBER,
   employeeCode: '',
   jobTitle: '',
-  departmentId: '',
   status: EMPLOYEE_STATUS.ACTIVE,
   hireDate: '',
 }
@@ -173,33 +145,12 @@ function memberDisplayName(member: OrganizationMember): string {
 }
 
 function buildFormState(member: OrganizationMember): EmployeeMemberFormState {
-  const nameFallback = splitPersianFullName(member.user.name ?? '')
   const emp = member.employee
 
   return {
-    firstName: emp?.firstName ?? nameFallback.firstName,
-    lastName: emp?.lastName ?? nameFallback.lastName,
-    nationalId: emp?.nationalId ?? '',
-    fatherName: emp?.fatherName ?? '',
-    motherName: emp?.motherName ?? '',
-    birthCertificateNumber: emp?.birthCertificateNumber ?? '',
-    birthCertificateDate: toDateInputValue(emp?.birthCertificateDate),
-    birthDate: toDateInputValue(emp?.birthDate),
-    maritalStatus: emp?.maritalStatus ?? '',
-    address: emp?.address ?? '',
-    postalCode: emp?.postalCode ?? '',
-    mobilePhone: emp?.mobilePhone ?? '',
-    landlinePhone: emp?.landlinePhone ?? '',
-    bankAccountNumber: emp?.bankAccountNumber ?? '',
-    bankCardNumber: emp?.bankCardNumber ?? '',
-    iban: emp?.iban ?? '',
-    bankName: emp?.bankName ?? '',
-    insuranceNumber: emp?.insuranceNumber ?? '',
-    email: member.user.email ?? '',
     role: member.role,
     employeeCode: emp?.employeeCode ?? '',
     jobTitle: emp?.jobTitle ?? '',
-    departmentId: emp?.department?.id ?? '',
     status: emp?.status ?? EMPLOYEE_STATUS.ACTIVE,
     hireDate: toDateInputValue(emp?.hireDate),
   }
@@ -212,16 +163,11 @@ export function OrganizationEmployeesPanel({
 }: OrganizationEmployeesPanelProps) {
   const { user: currentUser } = useAuth()
   const membersPath = tenantId ? `/tenants/${tenantId}/members` : null
-  const departmentsPath =
-    tenantId && (memberRole === TENANT_ROLES.OWNER || memberRole === TENANT_ROLES.ADMIN)
-      ? `/tenants/${tenantId}/departments`
-      : null
   const invitationsPath = tenantId && (memberRole === TENANT_ROLES.OWNER || memberRole === TENANT_ROLES.ADMIN)
     ? `/tenants/${tenantId}/invitations`
     : null
 
   const { data, isLoading, error, refetch } = useApi<OrganizationMember[]>(membersPath)
-  const { data: departmentsData } = useApi<DepartmentOption[]>(departmentsPath)
   const { data: invitationData, refetch: refetchInvitations } = useApi<OrganizationInvitation[]>(invitationsPath)
 
   const [modalMode, setModalMode] = useState<MemberModalMode | null>(null)
@@ -240,7 +186,6 @@ export function OrganizationEmployeesPanel({
   const [searchingUsers, setSearchingUsers] = useState(false)
 
   const members = Array.isArray(data) ? data : []
-  const departments = Array.isArray(departmentsData) ? departmentsData : []
   const invitations = Array.isArray(invitationData) ? invitationData : []
   const canManage = memberRole === TENANT_ROLES.OWNER || memberRole === TENANT_ROLES.ADMIN
 
@@ -281,14 +226,8 @@ export function OrganizationEmployeesPanel({
 
   const validateForm = (form: EmployeeMemberFormState): boolean => {
     const errors: Partial<Record<string, string>> = {}
-
-    const profileResult = validateEmployeeProfile(buildProfilePayload(form), { requireAll: false })
-    Object.assign(errors, profileResult.errors)
-
-    if (!form.email.trim()) errors.email = 'ایمیل الزامی است'
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
-      errors.email = 'ایمیل معتبر نیست'
-    }
+    if (form.employeeCode.trim().length > 40) errors.employeeCode = 'کد پرسنلی نباید بیش از ۴۰ کاراکتر باشد'
+    if (form.jobTitle.trim().length > 120) errors.jobTitle = 'سمت نباید بیش از ۱۲۰ کاراکتر باشد'
 
     setFieldErrors(errors)
     return Object.keys(errors).length === 0
@@ -303,7 +242,6 @@ export function OrganizationEmployeesPanel({
     setSaveError(null)
     let invitationSent = false
 
-    const profile = buildProfilePayload(formState)
     const employeeCode = formState.employeeCode.trim()
     const jobTitle = formState.jobTitle.trim()
 
@@ -320,9 +258,8 @@ export function OrganizationEmployeesPanel({
             role: formState.role,
             ...(employeeCode ? { employeeCode } : {}),
             ...(jobTitle ? { jobTitle } : {}),
-            ...(formState.departmentId ? { departmentId: formState.departmentId } : {}),
+            status: formState.status,
             ...(formState.hireDate ? { hireDate: formState.hireDate } : {}),
-            ...profile,
           },
         })
         invitationSent = true
@@ -333,10 +270,8 @@ export function OrganizationEmployeesPanel({
             role: editingMember.role === TENANT_ROLES.OWNER ? undefined : formState.role,
             ...(employeeCode ? { employeeCode } : {}),
             ...(jobTitle ? { jobTitle } : {}),
-            ...(formState.departmentId ? { departmentId: formState.departmentId } : {}),
             status: formState.status,
             ...(formState.hireDate ? { hireDate: formState.hireDate } : {}),
-            ...profile,
           },
         })
       }
@@ -374,14 +309,9 @@ export function OrganizationEmployeesPanel({
 
   const selectPlatformUser = (platformUser: PlatformUserSearchResult) => {
     if (platformUser.membershipStatus || platformUser.pendingInvitationId) return
-    const parsedName = splitPersianFullName(platformUser.name ?? '')
     setSelectedPlatformUser(platformUser)
     setFormState((current) => current && ({
       ...current,
-      email: platformUser.email,
-      firstName: current.firstName || parsedName.firstName,
-      lastName: current.lastName || parsedName.lastName,
-      mobilePhone: current.mobilePhone || platformUser.phone || '',
     }))
     setUserSearchResults([])
     setSaveError(null)
@@ -447,8 +377,7 @@ export function OrganizationEmployeesPanel({
           <TableHeader>
             <TableRow>
               <TableHead>نام</TableHead>
-              <TableHead>کد ملی</TableHead>
-              <TableHead>ایمیل</TableHead>
+                <TableHead>ایمیل</TableHead>
               <TableHead>کد پرسنلی</TableHead>
               <TableHead>نقش</TableHead>
               <TableHead>وضعیت</TableHead>
@@ -458,7 +387,7 @@ export function OrganizationEmployeesPanel({
           <TableBody>
             {members.length === 0 ? (
               <TableEmpty
-                colSpan={canManage ? 7 : 6}
+                colSpan={canManage ? 6 : 5}
                 message="کارمندی در این سازمان ثبت نشده است"
               />
             ) : (
@@ -466,9 +395,6 @@ export function OrganizationEmployeesPanel({
                 <TableRow key={member.userId}>
                   <TableCell className="font-medium text-slate-900">
                     {memberDisplayName(member)}
-                  </TableCell>
-                  <TableCell dir="ltr" className="text-left">
-                    {member.employee?.nationalId ?? '—'}
                   </TableCell>
                   <TableCell dir="ltr" className="text-left text-slate-600">
                     {member.user.email}
@@ -569,7 +495,7 @@ export function OrganizationEmployeesPanel({
                     <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-white p-3">
                       <UserCheck className="h-5 w-5 text-emerald-600" />
                       <div className="min-w-0 flex-1"><p className="font-medium text-slate-900">{selectedPlatformUser.name}</p><p className="truncate text-xs text-slate-500" dir="ltr">{selectedPlatformUser.email}{selectedPlatformUser.phone ? ` · ${selectedPlatformUser.phone}` : ''}</p></div>
-                      <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedPlatformUser(null); setFormState((current) => current && ({ ...current, email: '' })) }}>تغییر</Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedPlatformUser(null) }}>تغییر</Button>
                     </div>
                   ) : (
                     <>
@@ -590,7 +516,6 @@ export function OrganizationEmployeesPanel({
                 setFormState={setFormState}
                 mode={modalMode}
                 isOwner={modalMode === 'edit' && editingMember?.role === TENANT_ROLES.OWNER}
-                departments={departments}
                 fieldErrors={fieldErrors}
               />
 

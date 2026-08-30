@@ -1,8 +1,7 @@
-import { IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
-import { ORGANIZATIONAL_ROLES } from '@deska/shared';
-import { EmployeeProfileFieldsDto } from './employee-profile-fields.dto';
+import { IsDateString, IsIn, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { EMPLOYEE_STATUS, ORGANIZATIONAL_ROLES } from '@deska/shared';
 
-export class InviteMemberDto extends EmployeeProfileFieldsDto {
+export class InviteMemberDto {
   @IsString()
   @MinLength(10, { message: 'شناسه کاربر معتبر نیست' })
   @MaxLength(64)
@@ -13,18 +12,19 @@ export class InviteMemberDto extends EmployeeProfileFieldsDto {
 
   @IsOptional()
   @IsString()
+  @MaxLength(40)
   employeeCode?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(120)
   jobTitle?: string;
 
   @IsOptional()
-  @IsString()
-  departmentId?: string;
+  @IsIn(Object.values(EMPLOYEE_STATUS), { message: 'وضعیت همکاری معتبر نیست' })
+  status?: string;
 
   @IsOptional()
-  @IsString()
+  @IsDateString({}, { message: 'تاریخ استخدام معتبر نیست' })
   hireDate?: string;
-
 }

@@ -1,8 +1,40 @@
-import { PrismaClient } from '@prisma/client';
+import { Prisma, PrismaClient } from '@prisma/client';
 import { backfillEmployeeProfile, backfillTenantEmployeeProfiles } from './employee-profile-backfill';
 
-function buildEmployeeCode(userId: string): string {
-  return `EMP-${userId.replace(/[^a-zA-Z0-9]/g, '').slice(-6).toUpperCase() || 'USER'}`;
+type SequenceRow = { prefix: string; suffix: string; padding: number; nextNumber: number };
+
+async function nextEmployeeCode(prisma: PrismaClient, tenantId: string): Promise<string> {
+  // UPDATE ... RETURNING makes the increment and the allocated number atomic.
+  const updated = await prisma.$queryRaw<SequenceRow[]>(Prisma.sql`
+    UPDATE "NumberSequence"
+    SET "nextNumber" = "nextNumber" + 1
+    WHERE "tenantId" = ${tenantId} AND "code" = 'employee'
+    RETURNING "prefix", "suffix", "padding", "nextNumber"
+  `);
+
+  let sequence = updated[0];
+  const number = sequence ? sequence.nextNumber - 1 : 1;
+
+  if (!sequence) {
+    try {
+      sequence = await prisma.numberSequence.create({
+        data: {
+          tenantId,
+          code: 'employee',
+          prefix: 'EMP-',
+          suffix: '',
+          nextNumber: 2,
+          padding: 4,
+        },
+        select: { prefix: true, suffix: true, padding: true, nextNumber: true },
+      });
+    } catch (error) {
+      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== 'P2002') throw error;
+      return nextEmployeeCode(prisma, tenantId);
+    }
+  }
+
+  return `${sequence.prefix}${String(number).padStart(Math.max(1, sequence.padding), '0')}${sequence.suffix}`;
 }
 
 export async function ensureEmployeeForUser(
@@ -33,14 +65,7 @@ export async function ensureEmployeeForUser(
     return existing;
   }
 
-  let employeeCode = buildEmployeeCode(userId);
-  const codeTaken = await prisma.employee.findFirst({
-    where: { tenantId, employeeCode },
-  });
-
-  if (codeTaken) {
-    employeeCode = `EMP-${userId.slice(0, 8).toUpperCase()}`;
-  }
+  const employeeCode = await nextEmployeeCode(prisma, tenantId);
 
   return prisma.employee.create({
     data: {

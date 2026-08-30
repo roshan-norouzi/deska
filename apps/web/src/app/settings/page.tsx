@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import { Building2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { Building2, Hash } from 'lucide-react'
 import { ProtectedLayout } from '@/components/layout/protected-layout'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -23,12 +23,25 @@ interface TenantDetail {
   }
 }
 
+interface EmployeeCodeSettings { prefix: string; suffix: string; padding: number }
+
 function SettingsContent() {
   const { activeTenant, refreshCurrentTenant } = useTenant()
   const { data, isLoading, refetch } = useApi<TenantDetail>('/tenants/current')
+  const canManage = activeTenant?.memberRole === 'owner' || activeTenant?.memberRole === 'admin'
+  const { data: codeSettings, refetch: refetchCodeSettings } = useApi<EmployeeCodeSettings>(canManage && activeTenant ? `/tenants/${activeTenant.id}/employee-code-settings` : null)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [prefix, setPrefix] = useState('')
+  const [suffix, setSuffix] = useState('')
+  const [savingCodeSettings, setSavingCodeSettings] = useState(false)
+
+  useEffect(() => {
+    if (!codeSettings) return
+    setPrefix(codeSettings.prefix ?? '')
+    setSuffix(codeSettings.suffix ?? '')
+  }, [codeSettings])
 
   const tenant = data ?? activeTenant
 
@@ -51,6 +64,19 @@ function SettingsContent() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleCodeSettingsSave = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!tenant) return
+    setSavingCodeSettings(true)
+    try {
+      await apiFetch(`/tenants/${tenant.id}/employee-code-settings`, { method: 'PATCH', body: { prefix, suffix } })
+      await refetchCodeSettings()
+      setMessage('قالب کد پرسنلی ذخیره شد؛ روی کدهای جدید اعمال می‌شود')
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'خطا در ذخیره قالب کد پرسنلی')
+    } finally { setSavingCodeSettings(false) }
   }
 
   if (isLoading && !tenant) {
@@ -97,6 +123,13 @@ function SettingsContent() {
           </form>
         </CardContent>
       </Card>
+
+      {canManage && tenant && (
+        <Card className="mx-auto w-full max-w-3xl overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70"><CardTitle className="flex items-center gap-2"><Hash className="h-4 w-4" />قالب کد پرسنلی</CardTitle><p className="mt-1 text-xs text-slate-500">عدد کد پرسنلی به‌صورت خودکار و یکتا تولید می‌شود. این قالب فقط برای کدهای جدید استفاده خواهد شد.</p></CardHeader>
+          <CardContent><form onSubmit={handleCodeSettingsSave} className="space-y-4"><div className="grid gap-4 sm:grid-cols-2"><Input label="پیشوند" value={prefix} onChange={(event) => setPrefix(event.target.value)} maxLength={20} dir="ltr" placeholder="EMP-" /><Input label="پسوند" value={suffix} onChange={(event) => setSuffix(event.target.value)} maxLength={20} dir="ltr" placeholder="-IR" /></div><p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600" dir="ltr">نمونه: {prefix || 'EMP-'}0001{suffix}</p><Button type="submit" isLoading={savingCodeSettings}>ذخیره قالب کد</Button></form></CardContent>
+        </Card>
+      )}
     </div>
   )
 }

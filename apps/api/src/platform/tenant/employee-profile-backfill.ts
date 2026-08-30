@@ -1,6 +1,6 @@
 import type { Department, Employee, Prisma } from '@prisma/client';
 import { PrismaClient } from '@prisma/client';
-import { formatEmployeeFullName, normalizeEmployeeProfile, splitPersianFullName } from '@deska/shared';
+import { normalizeEmployeeProfile, splitPersianFullName } from '@deska/shared';
 import { DEMO_EMPLOYEE_PROFILES } from './demo-employee-profiles';
 
 type EmployeeWithDepartment = Employee & { department?: Department | null };
@@ -108,17 +108,6 @@ export async function backfillEmployeeProfile(
     data: update,
     include: { department: true },
   });
-
-  const displayName = formatEmployeeFullName({
-    firstName: updated.firstName,
-    lastName: updated.lastName,
-  });
-  if (displayName && updated.userId) {
-    await prisma.user.update({
-      where: { id: updated.userId },
-      data: { name: displayName },
-    });
-  }
 
   return updated;
 }

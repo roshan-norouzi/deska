@@ -2,15 +2,20 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Patch,
   Post,
   Req,
   Res,
   UnauthorizedException,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Throttle } from '@nestjs/throttler';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { memoryStorage } from 'multer';
 import type { CookieOptions, Request, Response } from 'express';
 import { Public } from '../../common/decorators/metadata.decorator';
 import { User } from '../../common/decorators/params.decorator';
@@ -24,6 +29,7 @@ import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { UpdateEmployeeProfileDto } from './dto/update-employee-profile.dto';
 
 const ACCESS_COOKIE_NAME = 'deska_access_token';
 const REFRESH_COOKIE_NAME = 'deska_refresh_token';
@@ -139,6 +145,44 @@ export class AuthController {
     const result = await this.authService.updateProfile(user.id, dto);
     if (result.requiresReauthentication) this.clearAuthCookies(response);
     return result;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('employee-profiles')
+  employeeProfiles(@User() user: AuthUser) {
+    return this.authService.employeeProfiles(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('employee-profiles/:tenantId')
+  updateEmployeeProfile(
+    @User() user: AuthUser,
+    @Param('tenantId') tenantId: string,
+    @Body() dto: UpdateEmployeeProfileDto,
+  ) {
+    return this.authService.updateOwnEmployeeProfile(user.id, tenantId, dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('profile/avatar')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
+  uploadProfileAvatar(@User() user: AuthUser, @UploadedFile() file: Express.Multer.File) {
+    return this.authService.uploadProfileAvatar(user.id, file);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('profile/avatar/:userId/:filename')
+  async getProfileAvatar(
+    @User() user: AuthUser,
+    @Param('userId') userId: string,
+    @Param('filename') filename: string,
+    @Res() response: Response,
+  ) {
+    const avatar = await this.authService.getProfileAvatar(user.id, userId, filename);
+    response.setHeader('Content-Type', avatar.contentType);
+    response.setHeader('Cache-Control', 'private, max-age=3600');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.sendFile(avatar.path);
   }
 
   @UseGuards(JwtAuthGuard)

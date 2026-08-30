@@ -1,6 +1,12 @@
 import type { NextConfig } from 'next';
 
+const development = process.env.NODE_ENV === 'development';
+
 const nextConfig: NextConfig = {
+  // Keep `next dev` artifacts separate from production builds. Running a
+  // production build while Hot Reload is active must never invalidate the
+  // development webpack manifest in the browser.
+  distDir: development ? '.next-dev' : '.next',
   ...(process.env.DOCKER_BUILD === 'true' ? { output: 'standalone' as const } : {}),
   basePath: process.env.NEXT_PUBLIC_BASE_PATH || '',
   transpilePackages: ['@deska/shared'],

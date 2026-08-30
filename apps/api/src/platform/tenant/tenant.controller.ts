@@ -21,6 +21,7 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
+import { UpdateEmployeeCodeSettingsDto } from './dto/update-employee-code-settings.dto';
 import { TenantService } from './tenant.service';
 
 @Controller('tenants')
@@ -94,6 +95,24 @@ export class TenantController {
   ) {
     this.assertTenantMatch(id, tenant.tenantId);
     return this.tenantService.inviteMember(tenant.tenantId, dto, tenant.memberRole, user.id);
+  }
+
+  @Get(':id/employee-code-settings')
+  @UseGuards(TenantGuard)
+  getEmployeeCodeSettings(@Param('id') id: string, @TenantCtx() tenant: TenantContext) {
+    this.assertTenantMatch(id, tenant.tenantId);
+    return this.tenantService.getEmployeeCodeSettings(tenant.tenantId, tenant.memberRole);
+  }
+
+  @Patch(':id/employee-code-settings')
+  @UseGuards(TenantGuard)
+  updateEmployeeCodeSettings(
+    @Param('id') id: string,
+    @Body() dto: UpdateEmployeeCodeSettingsDto,
+    @TenantCtx() tenant: TenantContext,
+  ) {
+    this.assertTenantMatch(id, tenant.tenantId);
+    return this.tenantService.updateEmployeeCodeSettings(tenant.tenantId, dto, tenant.memberRole);
   }
 
   @Get(':id/users/search')

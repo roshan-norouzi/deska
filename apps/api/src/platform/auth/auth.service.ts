@@ -2,12 +2,15 @@ import {
   BadRequestException,
   ConflictException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import { createHash, randomUUID } from 'crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
@@ -15,8 +18,16 @@ import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
-import { normalizeDigits } from '@deska/shared';
+import { normalizeDigits, normalizeEmployeeProfile, pickProvidedProfileFields, type EmployeeProfileInput } from '@deska/shared';
 import { Prisma } from '@prisma/client';
+import { UpdateEmployeeProfileDto } from './dto/update-employee-profile.dto';
+import { ensureEmployeeForUser } from '../tenant/tenant-employee-sync';
+import { serializeEmployeeForApi } from '../tenant/employee-profile-backfill';
+import {
+  applyEmployeeProfileToUpdate,
+  assertUniqueNationalId,
+  assertValidEmployeeProfile,
+} from '../tenant/employee-profile.helper';
 
 interface JwtPayload {
   sub: string;
@@ -404,6 +415,144 @@ export class AuthService {
     if (digits.startsWith('0098')) return `+98${digits.slice(4)}`;
     if (digits.startsWith('09')) return `+98${digits.slice(1)}`;
     return digits.startsWith('+') ? digits : `+${digits}`;
+  }
+
+  async employeeProfiles(userId: string) {
+    const employees = await this.prisma.employee.findMany({
+      where: {
+        userId,
+        tenant: {
+          isActive: true,
+          status: 'active',
+          members: { some: { userId, status: 'active' } },
+        },
+      },
+      include: {
+        department: true,
+        tenant: { select: { id: true, name: true, slug: true } },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    return employees.map((employee) => ({
+      tenant: employee.tenant,
+      employee: serializeEmployeeForApi(employee),
+    }));
+  }
+
+  async updateOwnEmployeeProfile(
+    userId: string,
+    tenantId: string,
+    dto: UpdateEmployeeProfileDto,
+  ) {
+    const membership = await this.prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId } },
+      select: { status: true, joinedAt: true },
+    });
+    if (!membership || membership.status !== 'active') {
+      throw new UnauthorizedException('شما عضو فعال این سازمان نیستید');
+    }
+
+    const employee = await ensureEmployeeForUser(this.prisma, tenantId, userId, membership.joinedAt);
+    const provided = pickProvidedProfileFields(dto as unknown as EmployeeProfileInput);
+    assertValidEmployeeProfile(provided, { requireAll: false });
+    const normalized = normalizeEmployeeProfile(provided);
+    await assertUniqueNationalId(this.prisma, tenantId, normalized.nationalId, employee.id);
+
+    const update: Prisma.EmployeeUpdateInput = {};
+    applyEmployeeProfileToUpdate(provided, update);
+    const updated = Object.keys(update).length > 0
+      ? await this.prisma.employee.update({
+        where: { id: employee.id },
+        data: update,
+        include: { department: true },
+      })
+      : employee;
+
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId,
+        userId,
+        action: 'account.employee_profile_updated',
+        entityType: 'Employee',
+        entityId: employee.id,
+        changes: { fields: Object.keys(update) },
+      },
+    });
+
+    return { tenantId, employee: serializeEmployeeForApi(updated) };
+  }
+
+  async uploadProfileAvatar(userId: string, file?: Express.Multer.File) {
+    if (!file?.buffer?.length) throw new BadRequestException('تصویر پروفایل انتخاب نشده است');
+
+    const mimeTypes: Record<string, { extension: string; signature: (buffer: Buffer) => boolean }> = {
+      'image/jpeg': { extension: 'jpg', signature: (buffer) => buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff },
+      'image/png': { extension: 'png', signature: (buffer) => buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) },
+      'image/webp': { extension: 'webp', signature: (buffer) => buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP' },
+    };
+    const image = mimeTypes[file.mimetype];
+    if (!image || !image.signature(file.buffer)) {
+      throw new BadRequestException('فرمت تصویر فقط باید JPG، PNG یا WebP باشد');
+    }
+
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, isActive: true, status: 'active' },
+      select: { id: true, avatarUrl: true },
+    });
+    if (!user) throw new UnauthorizedException('حساب کاربری فعال نیست');
+
+    const filename = `${randomUUID()}.${image.extension}`;
+    const directory = this.profileStorageDirectory(userId);
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    const targetPath = path.join(directory, filename);
+    await fs.writeFile(targetPath, file.buffer, { mode: 0o600 });
+
+    const avatarUrl = `/auth/profile/avatar/${userId}/${filename}`;
+    await this.prisma.user.update({ where: { id: userId }, data: { avatarUrl } });
+    await this.removePreviousAvatar(user.avatarUrl, userId, filename);
+    return { avatarUrl };
+  }
+
+  async getProfileAvatar(requesterId: string, userId: string, filename: string) {
+    if (!/^[a-f0-9-]{20,80}\.(?:jpg|png|webp)$/iu.test(filename)) {
+      throw new NotFoundException('تصویر پروفایل یافت نشد');
+    }
+    const requester = await this.prisma.user.findFirst({
+      where: { id: requesterId, isActive: true, status: 'active' },
+      select: { id: true },
+    });
+    if (!requester) throw new UnauthorizedException('حساب کاربری فعال نیست');
+
+    const expectedUrl = `/auth/profile/avatar/${userId}/${filename}`;
+    const target = await this.prisma.user.findFirst({
+      where: { id: userId, avatarUrl: expectedUrl, isActive: true, status: 'active' },
+      select: { id: true },
+    });
+    if (!target) throw new NotFoundException('تصویر پروفایل یافت نشد');
+
+    const filePath = path.join(this.profileStorageDirectory(userId), filename);
+    try {
+      await fs.access(filePath);
+    } catch {
+      throw new NotFoundException('تصویر پروفایل یافت نشد');
+    }
+    return {
+      path: filePath,
+      contentType: filename.endsWith('.png') ? 'image/png' : filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg',
+    };
+  }
+
+  private profileStorageDirectory(userId: string) {
+    return path.resolve(process.env.STORAGE_PATH || path.resolve(process.cwd(), 'uploads'), 'profiles', userId);
+  }
+
+  private async removePreviousAvatar(avatarUrl: string | null, userId: string, currentFilename: string) {
+    const prefix = `/auth/profile/avatar/${userId}/`;
+    if (!avatarUrl?.startsWith(prefix)) return;
+    const previousFilename = path.basename(avatarUrl.slice(prefix.length));
+    if (!previousFilename || previousFilename === currentFilename || previousFilename.includes('..')) return;
+    await fs.rm(path.join(this.profileStorageDirectory(userId), previousFilename), { force: true });
   }
 
   private phoneVariants(canonicalPhone: string): string[] {
