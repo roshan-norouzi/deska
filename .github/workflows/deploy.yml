@@ -97,7 +97,23 @@ jobs:
         run: |
           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "DEPLOY_PATH='$DEPLOY_PATH' VERSION='$VERSION' IMAGE_PREFIX='$IMAGE_PREFIX' GHCR_USERNAME='$GHCR_USERNAME' GHCR_TOKEN='$GHCR_TOKEN' bash -s" <<'REMOTE'
           set -Eeuo pipefail
+          if [ ! -d "$DEPLOY_PATH" ]; then
+            echo "Deployment stopped: DEPLOY_PATH does not exist on the server."
+            exit 1
+          fi
           cd "$DEPLOY_PATH"
+          if ! command -v docker >/dev/null 2>&1; then
+            echo "Deployment stopped: Docker is not installed or not available to SERVER_USER."
+            exit 1
+          fi
+          if ! docker info >/dev/null 2>&1; then
+            echo "Deployment stopped: Docker Engine is not running or SERVER_USER lacks Docker permission."
+            exit 1
+          fi
+          if ! docker compose version >/dev/null 2>&1; then
+            echo "Deployment stopped: Docker Compose plugin is not available to SERVER_USER."
+            exit 1
+          fi
           if [ ! -f .env ]; then
             echo "Deployment stopped: server .env is missing at DEPLOY_PATH. Run the installer once first."
             exit 1

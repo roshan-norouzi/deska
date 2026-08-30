@@ -105,14 +105,34 @@ if ($AutoDispatch) {
     if ($run.conclusion -ne 'success') {
       $jobsUri = "https://api.github.com/repos/$owner/$repository/actions/runs/$($run.id)/jobs"
       $jobs = Invoke-RestMethod -Method Get -Uri $jobsUri -Headers $headers
-      $failedStep = @($jobs.jobs | ForEach-Object {
-        $jobName = $_.name
-        $_.steps | Where-Object { $_.conclusion -eq 'failure' } | ForEach-Object {
-          [pscustomobject]@{ Job = $jobName; Step = $_.name }
+      $failedJob = @($jobs.jobs | Where-Object { $_.conclusion -eq 'failure' } | Select-Object -First 1)
+      $failedStep = @()
+      if ($failedJob.Count -gt 0) {
+        $failedStep = @($failedJob[0].steps | Where-Object { $_.conclusion -eq 'failure' } | Select-Object -First 1)
+      }
+      if ($failedJob.Count -gt 0 -and $failedStep.Count -gt 0) {
+        Write-Host "Workflow failed at Job '$($failedJob[0].name)', Step '$($failedStep[0].name)'" -ForegroundColor Red
+        $logArchive = Join-Path ([IO.Path]::GetTempPath()) ("deska-actions-job-$($failedJob[0].id).zip")
+        $logFolder = Join-Path ([IO.Path]::GetTempPath()) ("deska-actions-job-$($failedJob[0].id)")
+        try {
+          Invoke-WebRequest -Method Get -Uri "https://api.github.com/repos/$owner/$repository/actions/jobs/$($failedJob[0].id)/logs" -Headers $headers -OutFile $logArchive -TimeoutSec 30
+          Expand-Archive -LiteralPath $logArchive -DestinationPath $logFolder -Force
+          $diagnosticLines = @(Get-ChildItem -LiteralPath $logFolder -File -Recurse | ForEach-Object {
+            Get-Content -LiteralPath $_.FullName | Where-Object { $_ -match '(?i)(deployment stopped|error|failed|fatal|denied|not found|permission|connection refused|timeout|no such file|unhealthy|exit code|docker compose)' }
+          })
+          if ($diagnosticLines.Count -gt 0) {
+            Write-Host 'Deployment diagnostics (secret values omitted):' -ForegroundColor Yellow
+            $diagnosticLines | Select-Object -Last 40 | ForEach-Object {
+              $_ -replace '(?i)(GHCR_TOKEN|SERVER_SSH_KEY|PASSWORD|SECRET|TOKEN|KEY)\s*[=:]\s*[^\s"'']+', '$1=[REDACTED]'
+            }
+          }
+        } catch {
+          Write-Host "Could not download job log automatically: $($_.Exception.Message)" -ForegroundColor DarkYellow
+        } finally {
+          Remove-Item -LiteralPath $logArchive -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath $logFolder -Recurse -Force -ErrorAction SilentlyContinue
         }
-      } | Select-Object -First 1)
-      if ($failedStep.Count -gt 0) {
-        throw "Workflow failed at Job '$($failedStep[0].Job)', Step '$($failedStep[0].Step)': $($run.html_url)"
+        throw "Workflow failed: $($run.html_url)"
       }
       throw "Workflow failed: $($run.html_url)"
     }
