@@ -14,7 +14,7 @@ async function main() {
   let admin = existingAdmin;
   if (!admin) {
     const bootstrapPassword = process.env.SEED_ADMIN_PASSWORD
-      || (process.env.NODE_ENV === 'production' ? '' : 'Admin@1234');
+      || '';
     if (bootstrapPassword.length < 12) {
       throw new Error('A unique SEED_ADMIN_PASSWORD of at least 12 characters is required for initial provisioning');
     }

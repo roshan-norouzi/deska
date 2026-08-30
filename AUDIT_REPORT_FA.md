@@ -165,6 +165,12 @@ DESKA ERP یک Modular Monolith چندسازمانی با NestJS، Next.js و Po
 4. تنظیم seed منسوخ‌شونده `package.json#prisma` را هنگام ارتقا به Prisma 7 به `prisma.config.ts` منتقل کنید.
 5. نگهداری access/refresh token در پاسخ JSON را در نسخه بعدی API با یک سیاست compatibility صریح محدود کنید؛ Web فعلی آن‌ها را ذخیره نمی‌کند.
 
+## نتیجه اجرای انتشار نسخه ۱.۰.۲۵
+
+طبق خروجی اجرای one-click deployment، export داده‌های مناسبت‌ها، افزایش نسخه، commit، push و ساخت imageهای API/Web انجام شده است؛ فقط گام `Deploy on server` شکست خورده است. جزئیات کامل log این گام از GitHub بدون دسترسی مدیریتی قابل دریافت نبود، اما در نسخه جدید متغیرهای `SETTINGS_ENCRYPTION_KEY` و `CORS_ORIGIN` در Compose اجباری شده‌اند، درحالی‌که نصب‌کننده قبلی کلید رمزنگاری را تولید نمی‌کرد. این ناسازگاری در نصب‌کننده‌های Linux/PowerShell اصلاح شد.
+
+برای نصب موجود، پیش از اجرای مجدد انتشار باید در `.env` سرور وجود مقادیر `POSTGRES_PASSWORD`، `JWT_SECRET`، `SETTINGS_ENCRYPTION_KEY` و `CORS_ORIGIN` بررسی شود. workflow جدید پیش از pull این موارد را بدون نمایش مقدارشان کنترل و در صورت شکست، وضعیت container و لاگ محدود API/Web را چاپ می‌کند. اگر `SETTINGS_ENCRYPTION_KEY` قبلاً استفاده شده است، آن را تعویض نکنید؛ تغییر آن secretهای رمزنگاری‌شده را غیرقابل‌خواندن می‌کند.
+
 ## نتیجه نهایی
 
 مشکلات بحرانی قابل اثبات این ممیزی اصلاح شده‌اند و مسیرهای build، migration، یکپارچگی tenant، امنیت نشست، کنترل خروجی شبکه، CI و اجرای محلی قابل تکرارند. سامانه در وضعیت فعلی برای staging مناسب است. production پس از انجام موارد P0 و تأیید integrationهای بیرونی و بازیابی بحران توصیه می‌شود.

@@ -98,6 +98,26 @@ jobs:
           ssh -p "$SERVER_PORT" "$SERVER_USER@$SERVER_HOST" "DEPLOY_PATH='$DEPLOY_PATH' VERSION='$VERSION' IMAGE_PREFIX='$IMAGE_PREFIX' GHCR_USERNAME='$GHCR_USERNAME' GHCR_TOKEN='$GHCR_TOKEN' bash -s" <<'REMOTE'
           set -Eeuo pipefail
           cd "$DEPLOY_PATH"
+          if [ ! -f .env ]; then
+            echo "Deployment stopped: server .env is missing at DEPLOY_PATH. Run the installer once first."
+            exit 1
+          fi
+          for key in POSTGRES_PASSWORD JWT_SECRET SETTINGS_ENCRYPTION_KEY CORS_ORIGIN; do
+            if ! grep -Eq "^${key}=[^[:space:]]+" .env; then
+              echo "Deployment stopped: server .env is missing required setting ${key}. Add it securely and retry."
+              exit 1
+            fi
+          done
+          on_deploy_error() {
+            code=$?
+            echo "Deployment command failed with exit code $code. Recent service state:"
+            docker compose ps || true
+            docker compose logs --tail=80 api web || true
+            exit "$code"
+          }
+          trap on_deploy_error ERR
+          if ! grep -Eq '^APP_VERSION=' .env; then printf '\nAPP_VERSION=%s\n' "$VERSION" >> .env; fi
+          if ! grep -Eq '^IMAGE_PREFIX=' .env; then printf '\nIMAGE_PREFIX=%s\n' "$IMAGE_PREFIX" >> .env; fi
           if [ -n "${GHCR_TOKEN:-}" ]; then
             printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USERNAME" --password-stdin >/dev/null
           fi

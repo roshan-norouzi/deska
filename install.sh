@@ -65,11 +65,11 @@ else
   [[ -z "$BASE_PATH" ]] || BASE_PATH="/$BASE_PATH"
   read -r -p "ایمیل مدیر (پیش‌فرض admin@deska.local): " ADMIN_EMAIL
   ADMIN_EMAIL="${ADMIN_EMAIL:-admin@deska.local}"
-  read -r -s -p "رمز مدیر (حداقل ۸ کاراکتر، پیش‌فرض Admin@1234): " ADMIN_PASSWORD
+  read -r -s -p "رمز مدیر (حداقل ۱۲ کاراکتر): " ADMIN_PASSWORD
   echo
-  ADMIN_PASSWORD="${ADMIN_PASSWORD:-Admin@1234}"
-  [[ "${#ADMIN_PASSWORD}" -ge 8 ]] || fail "رمز مدیر باید حداقل ۸ کاراکتر باشد."
+  [[ "${#ADMIN_PASSWORD}" -ge 12 ]] || fail "رمز مدیر باید حداقل ۱۲ کاراکتر باشد."
   JWT_SECRET="$(openssl rand -hex 32 2>/dev/null || date +%s%N)"
+  SETTINGS_ENCRYPTION_KEY="$(openssl rand -hex 32 2>/dev/null || date +%s%N)"
   cat > .env <<EOF
 POSTGRES_PASSWORD=deska123
 POSTGRES_PORT=5433
@@ -79,6 +79,7 @@ BASE_PATH=$BASE_PATH
 PUBLIC_URL=$PUBLIC_URL
 CORS_ORIGIN=$PUBLIC_URL:$WEB_PORT
 JWT_SECRET=$JWT_SECRET
+SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 APP_VERSION=$PACKAGE_VERSION
 IMAGE_PREFIX=${IMAGE_PREFIX:-}
 SEED_ADMIN_EMAIL=$ADMIN_EMAIL

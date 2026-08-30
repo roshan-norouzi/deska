@@ -45,12 +45,15 @@ if (-not (Test-Path .env)) {
   if ($basePath -and -not $basePath.StartsWith('/')) { $basePath = "/$basePath" }
   $adminEmail = Read-Host 'ایمیل مدیر (پیش‌فرض admin@deska.local)'
   if (-not $adminEmail) { $adminEmail = 'admin@deska.local' }
-  $secure = Read-Host 'رمز مدیر (پیش‌فرض Admin@1234)' -AsSecureString
+  $secure = Read-Host 'رمز مدیر (حداقل ۱۲ کاراکتر)' -AsSecureString
   $ptr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
   try { $adminPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($ptr) } finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($ptr) }
-  if (-not $adminPassword) { $adminPassword = 'Admin@1234' }
-  if ($adminPassword.Length -lt 8) { throw 'رمز مدیر باید حداقل ۸ کاراکتر باشد.' }
+  if ($adminPassword.Length -lt 12) { throw 'رمز مدیر باید حداقل ۱۲ کاراکتر باشد.' }
   $jwt = [Convert]::ToBase64String([byte[]](1..48 | ForEach-Object { Get-Random -Maximum 256 }))
+  $keyBytes = New-Object byte[] 32
+  $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
+  try { $rng.GetBytes($keyBytes) } finally { $rng.Dispose() }
+  $settingsKey = [Convert]::ToBase64String($keyBytes)
   $dbPassword = 'deska123'
   @"
 POSTGRES_PASSWORD=$dbPassword
@@ -61,6 +64,7 @@ BASE_PATH=$basePath
 PUBLIC_URL=$publicUrl
 CORS_ORIGIN=$publicUrl`:$webPort
 JWT_SECRET=$jwt
+SETTINGS_ENCRYPTION_KEY=$settingsKey
 APP_VERSION=$packageVersion
 IMAGE_PREFIX=$($env:IMAGE_PREFIX)
 SEED_ADMIN_EMAIL=$adminEmail
