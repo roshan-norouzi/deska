@@ -475,6 +475,28 @@ $apiCommand = "Set-Location '$root\apps\api'; `$env:DATABASE_URL='$env:DATABASE_
 $webCommand = "Set-Location '$root\apps\web'; `$env:NODE_ENV='development'; `$env:CHOKIDAR_USEPOLLING='true'; `$env:WATCHPACK_POLLING='true'; .\node_modules\.bin\next.cmd dev --port 3000"
 $sharedProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',$sharedWatchCommand -RedirectStandardOutput "$root\deska-shared.log" -RedirectStandardError "$root\deska-shared.err.log" -PassThru
 $apiProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',$apiCommand -RedirectStandardOutput "$root\deska-api.log" -RedirectStandardError "$root\deska-api.err.log" -PassThru
+
+# Wait for the API health endpoint before starting Web. Starting both processes
+# at once makes Next.js proxy the first auth requests while Nest is still
+# compiling, which surfaces a misleading "API unavailable" error in the UI.
+$apiReady = $false
+for ($attempt = 1; $attempt -le 45; $attempt++) {
+    if ($apiProcess.HasExited) {
+        throw 'Startup failed: API process exited before becoming ready. Logs: deska-api.log / deska-api.err.log'
+    }
+    try {
+        $health = Invoke-WebRequest -UseBasicParsing -Uri 'http://localhost:3001/api/health' -TimeoutSec 2
+        if ($health.StatusCode -ge 200 -and $health.StatusCode -lt 300) {
+            $apiReady = $true
+            break
+        }
+    } catch { }
+    Start-Sleep -Seconds 1
+}
+if (-not $apiReady) {
+    throw 'Startup timed out: API health endpoint did not become ready within 45 seconds. Check deska-api.log / deska-api.err.log.'
+}
+
 $webProcess = Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-Command',$webCommand -RedirectStandardOutput "$root\deska-web.log" -RedirectStandardError "$root\deska-web.err.log" -PassThru
 
 @{
