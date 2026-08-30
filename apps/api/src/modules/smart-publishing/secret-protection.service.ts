@@ -7,6 +7,7 @@ const PREFIX = 'enc:v1:';
 @Injectable()
 export class SecretProtectionService {
   private readonly key: Buffer;
+  private readonly previousKey?: Buffer;
 
   constructor(config: ConfigService) {
     const explicitKey = config.get<string>('SETTINGS_ENCRYPTION_KEY')?.trim();
@@ -21,6 +22,14 @@ export class SecretProtectionService {
       throw new Error('SETTINGS_ENCRYPTION_KEY is required');
     }
     this.key = createHash('sha256').update(configured).digest();
+
+    // A previous key is accepted only for decryption. This lets production
+    // deployments rotate an unsafe key without losing already-encrypted
+    // integration credentials. New values are always encrypted with `key`.
+    const previous = config.get<string>('SETTINGS_ENCRYPTION_KEY_PREVIOUS')?.trim();
+    if (previous && previous !== configured) {
+      this.previousKey = createHash('sha256').update(previous).digest();
+    }
   }
 
   encrypt(value: string): string {
@@ -34,14 +43,18 @@ export class SecretProtectionService {
 
   decrypt(value: string): string {
     if (!value.startsWith(PREFIX)) return value;
+    return this.decryptWithKey(value, this.key) ?? (this.previousKey ? this.decryptWithKey(value, this.previousKey) ?? '' : '');
+  }
+
+  private decryptWithKey(value: string, key: Buffer): string | null {
     try {
       const [ivValue, tagValue, encryptedValue] = value.slice(PREFIX.length).split('.');
-      if (!ivValue || !tagValue || !encryptedValue) return '';
-      const decipher = createDecipheriv('aes-256-gcm', this.key, Buffer.from(ivValue, 'base64url'));
+      if (!ivValue || !tagValue || !encryptedValue) return null;
+      const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivValue, 'base64url'));
       decipher.setAuthTag(Buffer.from(tagValue, 'base64url'));
       return Buffer.concat([decipher.update(Buffer.from(encryptedValue, 'base64url')), decipher.final()]).toString('utf8');
     } catch {
-      return '';
+      return null;
     }
   }
 }

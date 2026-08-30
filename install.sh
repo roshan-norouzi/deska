@@ -13,6 +13,18 @@ ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
 fail() { echo "[DESKA] خطا: $*" >&2; exit 1; }
+generate_secret() {
+  if command -v openssl >/dev/null 2>&1; then
+    openssl rand -hex 32
+  elif [[ -r /dev/urandom ]] && command -v od >/dev/null 2>&1; then
+    od -An -N32 -tx1 /dev/urandom | tr -d ' \n'
+  else
+    fail "ابزار امن تولید کلید در سیستم موجود نیست؛ openssl را نصب کنید."
+  fi
+}
+read_env_value() {
+  sed -n "s/^$1=//p" .env | tail -n 1 | tr -d '\r'
+}
 command -v docker >/dev/null 2>&1 || fail "Docker نصب نیست."
 docker info >/dev/null 2>&1 || fail "Docker در دسترس نیست؛ سرویس Docker را اجرا کنید."
 if docker compose version >/dev/null 2>&1; then
@@ -68,16 +80,17 @@ else
   read -r -s -p "رمز مدیر (حداقل ۱۲ کاراکتر): " ADMIN_PASSWORD
   echo
   [[ "${#ADMIN_PASSWORD}" -ge 12 ]] || fail "رمز مدیر باید حداقل ۱۲ کاراکتر باشد."
-  JWT_SECRET="$(openssl rand -hex 32 2>/dev/null || date +%s%N)"
-  SETTINGS_ENCRYPTION_KEY="$(openssl rand -hex 32 2>/dev/null || date +%s%N)"
+  JWT_SECRET="$(generate_secret)"
+  SETTINGS_ENCRYPTION_KEY="$(generate_secret)"
   cat > .env <<EOF
 POSTGRES_PASSWORD=deska123
 POSTGRES_PORT=5433
 API_PORT=3001
 WEB_PORT=$WEB_PORT
+WEB_BIND_ADDRESS=127.0.0.1
 BASE_PATH=$BASE_PATH
 PUBLIC_URL=$PUBLIC_URL
-CORS_ORIGIN=$PUBLIC_URL:$WEB_PORT
+CORS_ORIGIN=$PUBLIC_URL
 JWT_SECRET=$JWT_SECRET
 SETTINGS_ENCRYPTION_KEY=$SETTINGS_ENCRYPTION_KEY
 APP_VERSION=$PACKAGE_VERSION
@@ -87,6 +100,17 @@ SEED_ADMIN_PASSWORD=$ADMIN_PASSWORD
 SEED_ADMIN_NAME=مدیر سیستم
 EOF
 fi
+
+jwt_secret_value="$(read_env_value JWT_SECRET)"
+settings_key_value="$(read_env_value SETTINGS_ENCRYPTION_KEY)"
+[[ "${#jwt_secret_value}" -ge 32 ]] || fail "JWT_SECRET در .env باید حداقل ۳۲ کاراکتر باشد."
+[[ "${#settings_key_value}" -ge 32 ]] || fail "SETTINGS_ENCRYPTION_KEY در .env باید حداقل ۳۲ کاراکتر باشد."
+[[ "$jwt_secret_value" != "$settings_key_value" ]] || fail "SETTINGS_ENCRYPTION_KEY باید با JWT_SECRET متفاوت باشد."
+
+# Docker Compose prioritizes exported shell variables over .env. Remove stale
+# values so the validated installation file is always the source of truth.
+unset POSTGRES_PASSWORD JWT_SECRET SETTINGS_ENCRYPTION_KEY CORS_ORIGIN
+unset jwt_secret_value settings_key_value
 
 # Reuse the registry choice stored by a previous installation/update.
 if [[ -z "${IMAGE_PREFIX:-}" && -f .env ]]; then
@@ -103,7 +127,7 @@ else
 fi
 
 for attempt in $(seq 1 45); do
-  if curl -fsS "http://localhost:${WEB_PORT:-3000}/api/health" >/dev/null 2>&1; then
+  if curl -fsS "http://127.0.0.1:${API_PORT:-3001}/api/health" >/dev/null 2>&1; then
     echo "[DESKA] نصب با موفقیت انجام شد."
     LOGIN_URL="${PUBLIC_URL:-http://localhost}:${WEB_PORT:-3000}/login"
     [[ "${WEB_PORT:-3000}" == "80" ]] && LOGIN_URL="${PUBLIC_URL:-http://localhost}/login"

@@ -27,11 +27,18 @@ function assertProductionConfiguration() {
     throw new Error('JWT_SECRET must be a unique random value of at least 32 characters in production');
   }
   const encryptionKey = process.env.SETTINGS_ENCRYPTION_KEY?.trim() ?? '';
-  if (encryptionKey.length < 32 || WEAK_PRODUCTION_SECRETS.has(encryptionKey)) {
-    throw new Error('SETTINGS_ENCRYPTION_KEY must be a separate random value of at least 32 characters in production');
+  if (encryptionKey.length < 32) {
+    throw new Error('SETTINGS_ENCRYPTION_KEY must contain at least 32 characters in production');
+  }
+  if (WEAK_PRODUCTION_SECRETS.has(encryptionKey)) {
+    throw new Error('SETTINGS_ENCRYPTION_KEY must not use a known placeholder value in production');
   }
   if (encryptionKey === jwtSecret) {
     throw new Error('SETTINGS_ENCRYPTION_KEY must not reuse JWT_SECRET in production');
+  }
+  const previousEncryptionKey = process.env.SETTINGS_ENCRYPTION_KEY_PREVIOUS?.trim();
+  if (previousEncryptionKey === encryptionKey) {
+    throw new Error('SETTINGS_ENCRYPTION_KEY_PREVIOUS must differ from SETTINGS_ENCRYPTION_KEY');
   }
 
   const corsOrigins = (process.env.CORS_ORIGIN ?? '').split(',').map((item) => item.trim()).filter(Boolean);

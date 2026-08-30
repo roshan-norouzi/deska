@@ -60,9 +60,10 @@ POSTGRES_PASSWORD=$dbPassword
 POSTGRES_PORT=5433
 API_PORT=3001
 WEB_PORT=$webPort
+WEB_BIND_ADDRESS=127.0.0.1
 BASE_PATH=$basePath
 PUBLIC_URL=$publicUrl
-CORS_ORIGIN=$publicUrl`:$webPort
+CORS_ORIGIN=$publicUrl
 JWT_SECRET=$jwt
 SETTINGS_ENCRYPTION_KEY=$settingsKey
 APP_VERSION=$packageVersion
@@ -72,6 +73,16 @@ SEED_ADMIN_PASSWORD=$adminPassword
 SEED_ADMIN_NAME=مدیر سیستم
 "@ | Set-Content -Encoding utf8 .env
 }
+
+$jwtSecretValue = ((Get-Content .env | Where-Object { $_ -match '^JWT_SECRET=' } | Select-Object -Last 1) -replace '^JWT_SECRET=', '').Trim()
+$settingsKeyValue = ((Get-Content .env | Where-Object { $_ -match '^SETTINGS_ENCRYPTION_KEY=' } | Select-Object -Last 1) -replace '^SETTINGS_ENCRYPTION_KEY=', '').Trim()
+if ($jwtSecretValue.Length -lt 32) { throw 'JWT_SECRET در .env باید حداقل ۳۲ کاراکتر باشد.' }
+if ($settingsKeyValue.Length -lt 32) { throw 'SETTINGS_ENCRYPTION_KEY در .env باید حداقل ۳۲ کاراکتر باشد.' }
+if ($jwtSecretValue -eq $settingsKeyValue) { throw 'SETTINGS_ENCRYPTION_KEY باید با JWT_SECRET متفاوت باشد.' }
+
+# Docker Compose prioritizes variables inherited from the host process over
+# `.env`; make the validated file the single configuration source.
+Remove-Item Env:POSTGRES_PASSWORD, Env:JWT_SECRET, Env:SETTINGS_ENCRYPTION_KEY, Env:CORS_ORIGIN -ErrorAction SilentlyContinue
 
 if (-not $env:IMAGE_PREFIX -and (Test-Path .env)) {
   $savedPrefix = (Get-Content .env | Where-Object { $_ -match '^IMAGE_PREFIX=' } | Select-Object -First 1) -replace '^IMAGE_PREFIX=', ''
@@ -88,9 +99,12 @@ if ($env:IMAGE_PREFIX) {
 }
 for ($i = 0; $i -lt 45; $i++) {
   try {
-    $port = if ($webPort) { $webPort } else { '3000' }
-    $r = Invoke-WebRequest -UseBasicParsing "http://localhost:$port/api/health" -TimeoutSec 3
+    $apiPort = ((Get-Content .env | Where-Object { $_ -match '^API_PORT=' } | Select-Object -Last 1) -replace '^API_PORT=', '').Trim()
+    if (-not $apiPort) { $apiPort = '3001' }
+    $r = Invoke-WebRequest -UseBasicParsing "http://127.0.0.1:$apiPort/api/health" -TimeoutSec 3
     if ($r.StatusCode -eq 200) {
+      $port = ((Get-Content .env | Where-Object { $_ -match '^WEB_PORT=' } | Select-Object -Last 1) -replace '^WEB_PORT=', '').Trim()
+      if (-not $port) { $port = '3000' }
       $loginUrl = if ($port -eq '80') { "$publicUrl/login" } else { "$publicUrl`:$port/login" }
       Set-Content .deska-installed-version $packageVersion -NoNewline
       Write-Host "نصب/ارتقا با موفقیت انجام شد (نسخه $packageVersion): $loginUrl" -ForegroundColor Green

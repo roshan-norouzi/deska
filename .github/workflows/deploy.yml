@@ -85,6 +85,15 @@ jobs:
         shell: bash
         run: mkdir -p ~/.ssh && ssh-keyscan -p "${{ secrets.SERVER_PORT }}" -H "${{ secrets.SERVER_HOST }}" >> ~/.ssh/known_hosts
 
+      - name: Upload deployment configuration
+        shell: bash
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          SERVER_PORT: ${{ secrets.SERVER_PORT }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: scp -P "$SERVER_PORT" docker-compose.yml "$SERVER_USER@$SERVER_HOST:$DEPLOY_PATH/.deska-compose-${{ env.VERSION }}.yml"
+
       - name: Deploy on server
         shell: bash
         env:
@@ -118,12 +127,68 @@ jobs:
             echo "Deployment stopped: server .env is missing at DEPLOY_PATH. Run the installer once first."
             exit 1
           fi
+          incoming_compose=".deska-compose-${VERSION}.yml"
+          if [ ! -f "$incoming_compose" ]; then
+            echo "Deployment stopped: current docker-compose.yml was not received by the server."
+            exit 1
+          fi
           for key in POSTGRES_PASSWORD JWT_SECRET SETTINGS_ENCRYPTION_KEY CORS_ORIGIN; do
             if ! grep -Eq "^${key}=[^[:space:]]+" .env; then
               echo "Deployment stopped: server .env is missing required setting ${key}. Add it securely and retry."
               exit 1
             fi
           done
+          read_env_value() {
+            sed -n "s/^$1=//p" .env | tail -n 1 | tr -d '\r'
+          }
+          replace_env_value() {
+            key="$1"
+            value="$2"
+            tmp_file="$(mktemp .env.deska.XXXXXX)"
+            found=0
+            while IFS= read -r line || [ -n "$line" ]; do
+              case "$line" in
+                "$key"=*) printf '%s=%s\n' "$key" "$value"; found=1 ;;
+                *) printf '%s\n' "$line" ;;
+              esac
+            done < .env > "$tmp_file"
+            if [ "$found" -eq 0 ]; then printf '%s=%s\n' "$key" "$value" >> "$tmp_file"; fi
+            chmod 600 "$tmp_file"
+            mv "$tmp_file" .env
+          }
+          jwt_secret_value="$(read_env_value JWT_SECRET)"
+          settings_key_value="$(read_env_value SETTINGS_ENCRYPTION_KEY)"
+          if [ "${#jwt_secret_value}" -lt 32 ]; then
+            echo "Deployment stopped: JWT_SECRET must contain at least 32 characters."
+            exit 1
+          fi
+          case "$settings_key_value" in
+            dev-secret|deska-development-secret|change-this-in-production|change-this-to-a-long-random-secret-in-production) invalid_settings_key=1 ;;
+            *) invalid_settings_key=0 ;;
+          esac
+          if [ "${#settings_key_value}" -lt 32 ] || [ "$jwt_secret_value" = "$settings_key_value" ] || [ "$invalid_settings_key" -eq 1 ]; then
+            # Retain the former key for decryption. The newly deployed API
+            # supports this controlled rotation, while all new secrets use a
+            # fresh independent encryption key.
+            previous_key_value="$settings_key_value"
+            new_key_value="$(openssl rand -hex 32)"
+            cp -p .env ".env.before-settings-key-rotation-${VERSION}"
+            replace_env_value SETTINGS_ENCRYPTION_KEY "$new_key_value"
+            if [ -n "$previous_key_value" ]; then
+              replace_env_value SETTINGS_ENCRYPTION_KEY_PREVIOUS "$previous_key_value"
+            fi
+            echo "Rotated an invalid SETTINGS_ENCRYPTION_KEY; previous encrypted settings remain readable during the transition."
+          fi
+          # Compose gives exported shell variables precedence over .env. Do not
+          # let stale values from the server account override the validated file.
+          unset POSTGRES_PASSWORD JWT_SECRET SETTINGS_ENCRYPTION_KEY CORS_ORIGIN
+          if ! docker compose --env-file .env -f "$incoming_compose" config -q; then
+            echo "Deployment stopped: the received docker-compose.yml is not valid with the server .env."
+            exit 1
+          fi
+          cp -p docker-compose.yml "docker-compose.yml.before-${VERSION}" 2>/dev/null || true
+          mv "$incoming_compose" docker-compose.yml
+          unset jwt_secret_value settings_key_value previous_key_value new_key_value invalid_settings_key
           on_deploy_error() {
             code=$?
             echo "Deployment command failed with exit code $code. Recent service state:"
@@ -139,9 +204,19 @@ jobs:
           fi
           if grep -q '^APP_VERSION=' .env; then sed -i "s/^APP_VERSION=.*/APP_VERSION=$VERSION/" .env; else printf '\nAPP_VERSION=%s\n' "$VERSION" >> .env; fi
           if grep -q '^IMAGE_PREFIX=' .env; then sed -i "s|^IMAGE_PREFIX=.*|IMAGE_PREFIX=$IMAGE_PREFIX|" .env; else printf '\nIMAGE_PREFIX=%s\n' "$IMAGE_PREFIX" >> .env; fi
-          docker compose pull api web
-          docker compose up -d --no-build --remove-orphans
-          docker compose run --rm api node prisma/seed.cjs
+          docker compose --env-file .env pull api web
+          docker compose --env-file .env up -d --no-build --remove-orphans
+          docker compose --env-file .env run --rm api node prisma/seed.cjs
+          for attempt in $(seq 1 45); do
+            if curl -fsS http://127.0.0.1:3001/api/health >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" = 45 ]; then
+              echo "Deployment stopped: API did not become healthy."
+              exit 1
+            fi
+            sleep 2
+          done
           printf '%s' "$VERSION" > .deska-installed-version
           docker image prune -f >/dev/null
           REMOTE
