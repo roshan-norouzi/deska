@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { ChevronDown, LogOut, Menu, Search, X } from 'lucide-react';
 import { PLATFORM_NAME } from '@deska/shared';
-import { cn } from '@/lib/utils';
+import { cn, withBasePath } from '@/lib/utils';
 import { useAuth } from '@/lib/auth-context';
 import { useTenant } from '@/lib/tenant-context';
 import { filterNavGroups, NAV_GROUPS } from '@/lib/navigation';
@@ -62,9 +62,9 @@ export function AppShell({ children, title }: AppShellProps) {
     setExpandedGroups((prev) => ({ ...prev, [groupId]: !prev[groupId] }));
   };
 
-  const handleLogout = () => {
-    logout();
-    window.location.href = '/login';
+  const handleLogout = async () => {
+    await logout();
+    window.location.assign(withBasePath('/login'));
   };
 
   return (
