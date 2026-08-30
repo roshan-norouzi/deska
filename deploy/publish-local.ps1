@@ -123,10 +123,17 @@ if ($AutoDispatch) {
         $logFolder = Join-Path ([IO.Path]::GetTempPath()) ("deska-actions-job-$($failedJob[0].id)")
         try {
           Invoke-WebRequest -Method Get -Uri "https://api.github.com/repos/$owner/$repository/actions/jobs/$($failedJob[0].id)/logs" -Headers $headers -OutFile $logArchive -TimeoutSec 30
-          Expand-Archive -LiteralPath $logArchive -DestinationPath $logFolder -Force
-          $diagnosticLines = @(Get-ChildItem -LiteralPath $logFolder -File -Recurse | ForEach-Object {
-            Get-Content -LiteralPath $_.FullName | Where-Object { $_ -match '(?i)(deployment stopped|error|failed|fatal|denied|not found|permission|connection refused|timeout|no such file|unhealthy|exit code|docker compose)' }
-          })
+          $logBytes = [IO.File]::ReadAllBytes($logArchive)
+          $isZip = $logBytes.Length -ge 2 -and $logBytes[0] -eq 0x50 -and $logBytes[1] -eq 0x4B
+          if ($isZip) {
+            Expand-Archive -LiteralPath $logArchive -DestinationPath $logFolder -Force
+            $diagnosticLines = @(Get-ChildItem -LiteralPath $logFolder -File -Recurse | ForEach-Object {
+              Get-Content -LiteralPath $_.FullName | Where-Object { $_ -match '(?i)(deployment stopped|error|failed|fatal|denied|not found|permission|connection refused|timeout|no such file|unhealthy|exit code|docker compose)' }
+            })
+          } else {
+            $logText = Get-Content -LiteralPath $logArchive -Raw -Encoding UTF8 -ErrorAction Stop
+            $diagnosticLines = @($logText -split "`r?`n" | Where-Object { $_ -match '(?i)(deployment stopped|error|failed|fatal|denied|not found|permission|connection refused|timeout|no such file|unhealthy|exit code|docker compose)' })
+          }
           if ($diagnosticLines.Count -gt 0) {
             Write-Host 'Deployment diagnostics (secret values omitted):' -ForegroundColor Yellow
             $diagnosticLines | Select-Object -Last 40 | ForEach-Object {
