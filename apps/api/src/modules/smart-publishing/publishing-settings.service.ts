@@ -348,6 +348,24 @@ export class PublishingSettingsService {
     }
   }
 
+  async renameFontFamily(tenantId: string, id: string, requestedName: string): Promise<FontRecord[]> {
+    if (id === 'vazirmatn') throw new BadRequestException('نام فونت Vazirmatn قابل ویرایش نیست');
+    const name = requestedName.trim();
+    if (!/^[\w\u0600-\u06ff -]{1,80}$/u.test(name) || name.toLowerCase() === 'vazirmatn') throw new BadRequestException('نام فونت معتبر نیست');
+    const current = await this.getRaw(tenantId);
+    const library = JSON.parse(normalizeFontLibrary(current.social_font_library || DEFAULTS.social_font_library!)) as FontRecord[];
+    const found = library.find((font) => font.id === id);
+    if (!found) throw new NotFoundException('فونت پیدا نشد');
+    const oldName = found.name;
+    if (oldName.toLowerCase() === name.toLowerCase()) return library;
+    if (library.some((font) => font.name.toLowerCase() === name.toLowerCase() && font.name.toLowerCase() !== oldName.toLowerCase())) {
+      throw new BadRequestException('خانواده فونتی با این نام وجود دارد');
+    }
+    const next = library.map((font) => font.name.toLowerCase() === oldName.toLowerCase() ? { ...font, name } : font);
+    await this.save(tenantId, { social_font_library: JSON.stringify(next) });
+    return next;
+  }
+
   async fontFile(tenantId: string, filename: string): Promise<{ buffer: Buffer; contentType: string }> {
     this.assertAssetPath(tenantId, filename, /\.(woff2?|ttf|otf)$/i);
     const ext = path.extname(filename).toLowerCase();
