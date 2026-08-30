@@ -120,7 +120,7 @@ export async function apiFetch<T = unknown>(
       body: body instanceof FormData ? body : body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch {
-    throw new ApiError('سرور API در دسترس نیست — لطفاً Run.bat را اجرا کنید', 503);
+    throw new ApiError('ارتباط با سرور API برقرار نشد؛ وضعیت API و reverse proxy را بررسی کنید.', 503);
   }
 
   if (response.status === 401 && !skipAuth) {
@@ -158,7 +158,7 @@ export async function apiFetch<T = unknown>(
         !rawText.trim());
 
     const message = isProxyFailure
-      ? 'سرور API در دسترس نیست — Run.bat را اجرا کنید (Docker Desktop باید روشن باشد)'
+      ? 'ارتباط Web با سرور API برقرار نشد؛ وضعیت API و reverse proxy را بررسی کنید.'
       : (errorData as { message?: string | string[] })?.message
         ? Array.isArray((errorData as { message: string[] }).message)
           ? (errorData as { message: string[] }).message.join('، ')
