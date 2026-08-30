@@ -28,7 +28,7 @@ model Project {
   updatedAt       DateTime        @updatedAt
   tasks           Task[]
   members         ProjectMember[]
-  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant          Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent          Project?        @relation("ProjectTree", fields: [parentId], references: [id], onDelete: SetNull)
   subProjects     Project[]       @relation("ProjectTree")
 
@@ -53,7 +53,7 @@ model Task {
   sortOrder           Int             @default(0)
   createdAt           DateTime        @default(now())
   updatedAt           DateTime        @updatedAt
-  tenant              Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant              Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   project             Project?        @relation(fields: [projectId], references: [id], onDelete: Cascade)
   parent              Task?           @relation("TaskTree", fields: [parentId], references: [id], onDelete: SetNull)
   subtasks            Task[]          @relation("TaskTree")
@@ -109,7 +109,7 @@ model PublishChannel {
   settings  Json             @default("{}")
   createdAt DateTime         @default(now())
   articles  PublishArticle[]
-  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, type])
 }
@@ -126,7 +126,7 @@ model PublishArticle {
   createdById String?
   createdAt   DateTime        @default(now())
   updatedAt   DateTime        @updatedAt
-  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant      Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   channel     PublishChannel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, status])
@@ -145,7 +145,7 @@ model NewsFeed {
   createdAt      DateTime        @default(now())
   articles       NewsArticle[]
   socialArticles SocialArticle[]
-  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant         Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, url])
   @@index([tenantId, enabled])
@@ -178,7 +178,7 @@ model NewsArticle {
   lastError            String                       @default("")
   createdAt            DateTime                     @default(now())
   updatedAt            DateTime                     @updatedAt
-  tenant               Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant               Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   feed                 NewsFeed?                    @relation(fields: [feedId], references: [id], onDelete: SetNull)
   dailyReportItems     DailyReportItem[]
   dailyReportDecisions DailyReportArticleDecision[]
@@ -196,7 +196,7 @@ model DailyReport {
   archivedAt DateTime?
   createdAt  DateTime                     @default(now())
   updatedAt  DateTime                     @updatedAt
-  tenant     Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant     Tenant                       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   items      DailyReportItem[]
   decisions  DailyReportArticleDecision[]
 
@@ -212,7 +212,7 @@ model DailyReportArticleDecision {
   decision  String      @default("rejected")
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
-  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant    Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   report    DailyReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
   article   NewsArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
 
@@ -239,7 +239,7 @@ model DailyReportItem {
   lastError         String       @default("")
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @updatedAt
-  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant            Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   report            DailyReport  @relation(fields: [reportId], references: [id], onDelete: Cascade)
   article           NewsArticle? @relation(fields: [articleId], references: [id], onDelete: SetNull)
 
@@ -257,7 +257,7 @@ model SocialFeed {
   isActive  Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
 }
@@ -286,7 +286,7 @@ model SocialArticle {
   telegramSentAt      DateTime?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
-  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant              Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   feed                NewsFeed? @relation(fields: [feedId], references: [id], onDelete: SetNull)
 
   @@unique([tenantId, link])
@@ -317,6 +317,7 @@ model User {
   refreshTokens         RefreshToken[]
   passwordResetTokens   PasswordResetToken[]
   tenantMembers         TenantMember[]
+  receivedInvitations   TenantInvitation[] @relation("TenantInvitationUser")
   createdTenants        Tenant[]             @relation("TenantCreatedBy")
   primaryOwnedTenants   Tenant[]             @relation("TenantPrimaryOwner")
   notifications         Notification[]
@@ -363,10 +364,9 @@ model Tenant {
   createdAt              DateTime                     @default(now())
   updatedAt              DateTime                     @updatedAt
   createdBy              User?                        @relation("TenantCreatedBy", fields: [createdByUserId], references: [id], onDelete: SetNull)
-  primaryOwner           User?                        @relation("TenantPrimaryOwner", fields: [primaryOwnerUserId], references: [id], onDelete: SetNull)
+  primaryOwner           User?                        @relation("TenantPrimaryOwner", fields: [primaryOwnerUserId], references: [id], onDelete: Restrict)
   members                TenantMember[]
   modules                TenantModule[]
-  roles                  RoleDefinition[]
   invitations            TenantInvitation[]
   projects               Project[]
   tasks                  Task[]
@@ -409,7 +409,7 @@ model TenantMember {
   joinedAt      DateTime  @default(now())
   roleChangedAt DateTime?
   leftAt        DateTime?
-  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant        Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user          User      @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([tenantId, userId])
@@ -426,16 +426,20 @@ model TenantInvitation {
   tokenHash       String?   @unique
   status          String    @default("pending")
   invitedByUserId String?
+  invitedUserId   String?
+  metadata        Json      @default("{}")
   expiresAt       DateTime
   accepted        Boolean   @default(false)
   acceptedAt      DateTime?
   revokedAt       DateTime?
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @default(now()) @updatedAt
-  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant          Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invitedUser     User?     @relation("TenantInvitationUser", fields: [invitedUserId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, email])
   @@index([tenantId, status])
+  @@index([invitedUserId, status])
 }
 
 model ModuleDefinition {
@@ -460,32 +464,10 @@ model TenantModule {
   moduleId String
   enabled  Boolean          @default(false)
   settings Json             @default("{}")
-  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant   Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   module   ModuleDefinition @relation(fields: [moduleId], references: [id], onDelete: Cascade)
 
   @@id([tenantId, moduleId])
-}
-
-model RoleDefinition {
-  id          String           @id @default(cuid())
-  tenantId    String
-  name        String
-  description String?
-  isSystem    Boolean          @default(false)
-  createdAt   DateTime         @default(now())
-  tenant      Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  permissions RolePermission[]
-
-  @@unique([tenantId, name])
-}
-
-model RolePermission {
-  id         String         @id @default(cuid())
-  roleId     String
-  permission String
-  role       RoleDefinition @relation(fields: [roleId], references: [id], onDelete: Cascade)
-
-  @@unique([roleId, permission])
 }
 
 model CustomFieldDefinition {
@@ -500,7 +482,7 @@ model CustomFieldDefinition {
   required   Boolean  @default(false)
   sortOrder  Int      @default(0)
   createdAt  DateTime @default(now())
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, entityType, fieldName])
   @@index([tenantId, entityType])
@@ -517,7 +499,7 @@ model CustomFieldValue {
   valueDate    DateTime?
   valueBoolean Boolean?
   valueJson    Json?
-  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant       Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, entityType, entityId, fieldName])
   @@index([tenantId, entityType, entityId])
@@ -531,7 +513,7 @@ model NumberSequence {
   suffix     String @default("")
   nextNumber Int    @default(1)
   padding    Int    @default(4)
-  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@unique([tenantId, code])
 }
@@ -564,7 +546,7 @@ model Contact {
   isActive           Boolean              @default(true)
   createdAt          DateTime             @default(now())
   updatedAt          DateTime             @updatedAt
-  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant             Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   bankAccounts       ContactBankAccount[]
   employees          Employee[]
 
@@ -583,7 +565,7 @@ model ContactBankAccount {
   cardNumber    String?
   sheba         String?
   isDefault     Boolean @default(false)
-  tenant        Tenant  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant        Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   contact       Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
 
   @@index([tenantId])
@@ -600,7 +582,7 @@ model DocumentFolder {
   isSystem  Boolean          @default(false)
   systemKey String?
   createdAt DateTime         @default(now())
-  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant    Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   parent    DocumentFolder?  @relation("FolderTree", fields: [parentId], references: [id])
   children  DocumentFolder[] @relation("FolderTree")
   files     DocumentFile[]
@@ -623,7 +605,7 @@ model DocumentFile {
   version      Int             @default(1)
   uploadedById String?
   createdAt    DateTime        @default(now())
-  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant       Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   folder       DocumentFolder? @relation(fields: [folderId], references: [id])
 
   @@index([tenantId])
@@ -650,7 +632,7 @@ model CalendarEvent {
   createdById    String?
   createdAt      DateTime                @default(now())
   updatedAt      DateTime                @updatedAt
-  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   attendees      CalendarEventAttendee[]
 
   @@index([tenantId, startAt])
@@ -699,8 +681,8 @@ model AuditLog {
   changes    Json?
   ipAddress  String?
   createdAt  DateTime @default(now())
-  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
-  user       User?    @relation("AuditUser", fields: [userId], references: [id])
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User?    @relation("AuditUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, entityType, entityId])
   @@index([tenantId, createdAt])
@@ -716,8 +698,8 @@ model Activity {
   entityId   String?
   metadata   Json?
   createdAt  DateTime @default(now())
-  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
-  user       User?    @relation("ActivityUser", fields: [userId], references: [id])
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user       User?    @relation("ActivityUser", fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, entityType, entityId])
 }
@@ -732,7 +714,7 @@ model Notification {
   link      String?
   isRead    Boolean  @default(false)
   createdAt DateTime @default(now())
-  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant    Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, isRead])
@@ -749,7 +731,7 @@ model Department {
   name        String
   parentId    String?
   managerId   String?
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   employees   Employee[]
   jobOpenings JobOpening[]
 
@@ -786,9 +768,9 @@ model Employee {
   insuranceNumber        String?
   createdAt              DateTime    @default(now())
   updatedAt              DateTime    @updatedAt
-  tenant                 Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant                 Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   department             Department? @relation(fields: [departmentId], references: [id])
-  user                   User?       @relation(fields: [userId], references: [id])
+  user                   User?       @relation(fields: [userId], references: [id], onDelete: Cascade)
   contact                Contact?    @relation(fields: [contactId], references: [id])
 
   @@unique([tenantId, employeeCode])
@@ -808,7 +790,7 @@ model JobOpening {
   description   String?
   status        String      @default("open")
   createdAt     DateTime    @default(now())
-  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  tenant        Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   departmentRef Department? @relation(fields: [departmentId], references: [id])
   applicants    Applicant[]
 

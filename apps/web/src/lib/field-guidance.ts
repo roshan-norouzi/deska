@@ -20,7 +20,6 @@ export function getFieldPlaceholder(label?: string, type?: string, name?: string
   if (key.includes('مکان')) return 'مثلاً دفتر مرکزی'
   if (key.includes('نام سازمان')) return 'مثلاً شرکت نمونه'
   if (key.includes('نام دپارتمان')) return 'مثلاً منابع انسانی'
-  if (key.includes('نام نقش')) return 'مثلاً مدیر منابع انسانی'
   if (key.includes('عنوان')) return 'عنوان را وارد کنید'
   if (key.includes('نام')) return 'نام را وارد کنید'
   if (type === 'textarea') return 'توضیحات تکمیلی را وارد کنید'

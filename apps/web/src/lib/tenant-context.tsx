@@ -58,7 +58,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
     const stored = getTenantId();
     if (stored && list.some((t) => t.id === stored)) {
       setActiveTenantIdState(stored);
-    } else if (list.length > 0) {
+    } else if (list.length === 1) {
       setActiveTenantIdState(list[0].id);
       setTenantId(list[0].id);
     } else {
@@ -93,9 +93,12 @@ export function TenantProvider({ children }: { children: ReactNode }) {
             const stored = getTenantId();
             if (stored && mapped.some((t) => t.id === stored)) {
               setActiveTenantIdState(stored);
-            } else if (mapped.length > 0) {
+            } else if (mapped.length === 1) {
               setActiveTenantIdState(mapped[0].id);
               setTenantId(mapped[0].id);
+            } else {
+              setActiveTenantIdState(null);
+              clearTenantId();
             }
           } else {
             await refreshTenants();

@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
-import { getDefaultPermissionsForTenantRole, MODULE_CATALOG } from '@deska/shared';
+import { MODULE_CATALOG } from '@deska/shared';
 
 const prisma = new PrismaClient();
 async function main() {
@@ -21,10 +21,6 @@ async function main() {
     await prisma.moduleDefinition.upsert({ where: { id: mod.id }, create: { id: mod.id, name: mod.name, domain: mod.domain, version: mod.version, dependencies: [...mod.dependencies], isCore: 'isCore' in mod ? mod.isCore : false }, update: { name: mod.name, domain: mod.domain, dependencies: [...mod.dependencies], isCore: 'isCore' in mod ? mod.isCore : false } });
     await prisma.tenantModule.upsert({ where: { tenantId_moduleId: { tenantId: tenant.id, moduleId: mod.id } }, create: { tenantId: tenant.id, moduleId: mod.id, enabled: true }, update: {} });
   }
-  const role = await prisma.roleDefinition.upsert({ where: { tenantId_name: { tenantId: tenant.id, name: 'مدیر' } }, create: { tenantId: tenant.id, name: 'مدیر', description: 'مدیریت هسته و کارمندان', isSystem: true }, update: {} });
-  const managerPermissions = getDefaultPermissionsForTenantRole('manager');
-  await prisma.rolePermission.deleteMany({ where: { roleId: role.id, permission: { notIn: managerPermissions } } });
-  for (const permission of managerPermissions) await prisma.rolePermission.upsert({ where: { roleId_permission: { roleId: role.id, permission } }, create: { roleId: role.id, permission }, update: {} });
   await prisma.department.upsert({ where: { id: 'hr-dept-default' }, create: { id: 'hr-dept-default', tenantId: tenant.id, name: 'منابع انسانی' }, update: { name: 'منابع انسانی' } });
   console.log('✅ هسته و کارمندان آماده شد');
 }

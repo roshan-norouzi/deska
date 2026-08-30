@@ -17,6 +17,13 @@ export async function ensureEmployeeForUser(
   });
 
   if (existing) {
+    if (existing.status !== 'active') {
+      return prisma.employee.update({
+        where: { id: existing.id },
+        data: { status: 'active', ...(joinedAt ? { hireDate: joinedAt } : {}) },
+        include: { department: true },
+      });
+    }
     if (existing.userId) {
       const user = await prisma.user.findUnique({ where: { id: existing.userId } });
       if (user && (!existing.firstName || !existing.lastName)) {

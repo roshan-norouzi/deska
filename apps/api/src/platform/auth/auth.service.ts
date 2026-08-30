@@ -14,6 +14,9 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
+import { normalizeDigits } from '@deska/shared';
+import { Prisma } from '@prisma/client';
 
 interface JwtPayload {
   sub: string;
@@ -104,13 +107,14 @@ export class AuthService {
 
   async registerUser(data: { email: string; name: string; password: string; phone?: string }) {
     const email = data.email.trim().toLowerCase();
-    const phone = data.phone?.trim() || undefined;
+    const phone = data.phone?.trim() ? this.normalizePhone(data.phone) : undefined;
+    const phoneVariants = phone ? this.phoneVariants(phone) : [];
 
     const existing = await this.prisma.user.findFirst({
-      where: { OR: [{ email }, ...(phone ? [{ phone }] : [])] },
+      where: { OR: [{ email }, ...(phoneVariants.length ? [{ phone: { in: phoneVariants } }] : [])] },
     });
     if (existing) {
-      throw new ConflictException('این ایمیل قبلاً ثبت شده است');
+      throw new ConflictException('این ایمیل یا شماره موبایل قبلاً ثبت شده است');
     }
 
     const passwordHash = await bcrypt.hash(data.password, 12);
@@ -211,6 +215,10 @@ export class AuthService {
         isActive: true,
         createdAt: true,
         tenantMembers: {
+          where: {
+            status: 'active',
+            tenant: { status: 'active', isActive: true },
+          },
           include: {
             tenant: {
               select: {
@@ -224,6 +232,20 @@ export class AuthService {
               },
             },
           },
+        },
+        receivedInvitations: {
+          where: {
+            status: 'pending',
+            expiresAt: { gt: new Date() },
+            tenant: { status: 'active', isActive: true },
+          },
+          select: {
+            id: true,
+            role: true,
+            expiresAt: true,
+            tenant: { select: { id: true, name: true, slug: true, plan: true } },
+          },
+          orderBy: { createdAt: 'desc' },
         },
       },
     });
@@ -255,7 +277,103 @@ export class AuthService {
         membershipStatus: m.status,
         joinedAt: m.joinedAt,
       })),
+      pendingInvitations: user.receivedInvitations,
     };
+  }
+
+  async updateProfile(userId: string, dto: UpdateProfileDto) {
+    const current = await this.prisma.user.findUnique({ where: { id: userId } });
+    if (!current?.isActive || current.status !== 'active') {
+      throw new UnauthorizedException('حساب کاربری فعال نیست');
+    }
+
+    const email = dto.email?.trim().toLowerCase();
+    const emailChanged = email !== undefined && email !== current.email;
+    const phone = dto.phone === null
+      ? null
+      : dto.phone === undefined
+        ? undefined
+        : this.normalizePhone(dto.phone);
+    const phoneVariants = phone ? this.phoneVariants(phone) : [];
+
+    if (emailChanged) {
+      if (!dto.currentPassword || !(await bcrypt.compare(dto.currentPassword, current.passwordHash))) {
+        throw new UnauthorizedException('برای تغییر ایمیل، رمز عبور فعلی صحیح الزامی است');
+      }
+    }
+
+    const conflicts = email || phoneVariants.length
+      ? await this.prisma.user.findFirst({
+        where: {
+          id: { not: userId },
+          OR: [
+            ...(email ? [{ email: { equals: email, mode: 'insensitive' as const } }] : []),
+            ...(phoneVariants.length ? [{ phone: { in: phoneVariants } }] : []),
+          ],
+        },
+        select: { email: true, phone: true },
+      })
+      : null;
+    if (conflicts?.email && email && conflicts.email.toLowerCase() === email) {
+      throw new ConflictException('این ایمیل قبلاً ثبت شده است');
+    }
+    if (conflicts?.phone && phone) {
+      throw new ConflictException('این شماره موبایل قبلاً ثبت شده است');
+    }
+
+    try {
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const user = await tx.user.update({
+          where: { id: userId },
+          data: {
+            ...(dto.name !== undefined ? { name: dto.name.trim() } : {}),
+            ...(email !== undefined ? { email } : {}),
+            ...(phone !== undefined ? { phone } : {}),
+            ...(dto.avatarUrl !== undefined ? { avatarUrl: dto.avatarUrl?.trim() || null } : {}),
+            ...(emailChanged ? {
+              emailVerifiedAt: null,
+              sessionsInvalidatedAt: new Date(),
+            } : {}),
+          },
+          select: {
+            id: true,
+            email: true,
+            phone: true,
+            name: true,
+            role: true,
+            avatarUrl: true,
+            status: true,
+            isActive: true,
+          },
+        });
+        if (emailChanged) {
+          await tx.refreshToken.deleteMany({ where: { userId } });
+          await tx.passwordResetToken.deleteMany({ where: { userId, usedAt: null } });
+        }
+        await tx.auditLog.create({
+          data: {
+            tenantId: null,
+            userId,
+            action: 'account.profile_updated',
+            entityType: 'User',
+            entityId: userId,
+            changes: {
+              nameChanged: dto.name !== undefined && dto.name.trim() !== current.name,
+              emailChanged,
+              phoneChanged: phone !== undefined && phone !== current.phone,
+              avatarChanged: dto.avatarUrl !== undefined && dto.avatarUrl !== current.avatarUrl,
+            },
+          },
+        });
+        return user;
+      });
+      return { user: updated, requiresReauthentication: emailChanged };
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('ایمیل یا شماره موبایل قبلاً ثبت شده است');
+      }
+      throw error;
+    }
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
@@ -279,6 +397,19 @@ export class AuthService {
     ]);
 
     return { success: true, message: 'رمز عبور با موفقیت تغییر کرد' };
+  }
+
+  private normalizePhone(value: string): string {
+    const digits = normalizeDigits(value).replace(/[\s()-]/g, '');
+    if (digits.startsWith('0098')) return `+98${digits.slice(4)}`;
+    if (digits.startsWith('09')) return `+98${digits.slice(1)}`;
+    return digits.startsWith('+') ? digits : `+${digits}`;
+  }
+
+  private phoneVariants(canonicalPhone: string): string[] {
+    const variants = new Set([canonicalPhone]);
+    if (canonicalPhone.startsWith('+98')) variants.add(`0${canonicalPhone.slice(3)}`);
+    return [...variants];
   }
 
   async setPassword(userId: string, newPassword: string) {

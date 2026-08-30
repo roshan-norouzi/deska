@@ -8,9 +8,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   getDefaultPermissionsForTenantRole,
-  TENANT_ROLE_LABELS,
   TENANT_ROLES,
-  type TenantRole,
 } from '@deska/shared';
 import { PrismaService } from '../../prisma/prisma.service';
 
@@ -71,24 +69,12 @@ export class TenantGuard implements CanActivate {
       throw new ForbiddenException('عضویت شما در این سازمان فعال نیست');
     }
 
-    const tenantRole = member.role as TenantRole;
-    const localizedRole = TENANT_ROLE_LABELS[tenantRole];
-    const roleDefinition = await this.prisma.roleDefinition.findFirst({
-      where: {
-        tenantId,
-        name: { in: [member.role, localizedRole].filter((name): name is string => Boolean(name)) },
-      },
-      include: { permissions: true },
-    });
-
     const hasAdministrativeRole = [TENANT_ROLES.OWNER, TENANT_ROLES.ADMIN].includes(
       member.role as typeof TENANT_ROLES.OWNER,
     );
     request.user.permissions = hasAdministrativeRole
       ? ['*']
-      : roleDefinition
-        ? roleDefinition.permissions.map((permission) => permission.permission)
-        : getDefaultPermissionsForTenantRole(member.role);
+      : getDefaultPermissionsForTenantRole(member.role);
 
     request.tenant = { tenantId, memberRole: member.role };
     return true;

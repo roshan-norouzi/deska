@@ -280,12 +280,12 @@ export class PublishingSettingsService {
     if (!/^[\w\u0600-\u06ff -]{1,80}$/u.test(name) || name.toLowerCase() === 'vazirmatn') throw new BadRequestException('نام فونت معتبر نیست');
     const id = randomUUID();
     const filename = `${id}${ext}`;
-    const dir = path.join(this.storagePath(), 'fonts');
+    const dir = this.tenantAssetDirectory('fonts', tenantId);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, filename), file.buffer);
     const current = await this.getRaw(tenantId);
     const library = JSON.parse(normalizeFontLibrary(current.social_font_library || DEFAULTS.social_font_library!)) as FontRecord[];
-    const record: FontRecord = { id, name, url: `/publishing/settings/fonts/file/${filename}` };
+    const record: FontRecord = { id, name, url: `/publishing/settings/fonts/file/${tenantId}/${filename}` };
     const next = [...library.filter((font) => font.name.toLowerCase() !== name.toLowerCase()), record];
     await this.save(tenantId, { social_font_library: JSON.stringify(next) });
     return record;
@@ -298,34 +298,67 @@ export class PublishingSettingsService {
     const found = library.find((font) => font.id === id);
     if (!found) throw new NotFoundException('فونت پیدا نشد');
     await this.save(tenantId, { social_font_library: JSON.stringify(library.filter((font) => font.id !== id)) });
-    if (found.url) await fs.rm(path.join(this.storagePath(), 'fonts', path.basename(found.url)), { force: true });
+    if (found.url) {
+      const tenantPrefix = `/publishing/settings/fonts/file/${tenantId}/`;
+      // Legacy assets were stored in a shared directory without ownership
+      // metadata. Keep them readable rather than risking deletion of a file
+      // referenced by another organization.
+      if (found.url.startsWith(tenantPrefix)) {
+        await fs.rm(path.join(this.tenantAssetDirectory('fonts', tenantId), path.basename(found.url)), { force: true });
+      }
+    }
   }
 
-  async fontFile(filename: string): Promise<{ buffer: Buffer; contentType: string }> {
+  async fontFile(tenantId: string, filename: string): Promise<{ buffer: Buffer; contentType: string }> {
+    this.assertAssetPath(tenantId, filename, /\.(woff2?|ttf|otf)$/i);
+    const ext = path.extname(filename).toLowerCase();
+    const contentType = ext === '.woff2' ? 'font/woff2' : ext === '.woff' ? 'font/woff' : ext === '.ttf' ? 'font/ttf' : 'font/otf';
+    try { return { buffer: await fs.readFile(path.join(this.tenantAssetDirectory('fonts', tenantId), filename)), contentType }; } catch { throw new NotFoundException(); }
+  }
+
+  async legacyFontFile(filename: string): Promise<{ buffer: Buffer; contentType: string }> {
     if (!/^[a-f0-9-]+\.(woff2?|ttf|otf)$/i.test(filename)) throw new NotFoundException();
     const ext = path.extname(filename).toLowerCase();
     const contentType = ext === '.woff2' ? 'font/woff2' : ext === '.woff' ? 'font/woff' : ext === '.ttf' ? 'font/ttf' : 'font/otf';
     try { return { buffer: await fs.readFile(path.join(this.storagePath(), 'fonts', filename)), contentType }; } catch { throw new NotFoundException(); }
   }
 
-  async addImage(file: { originalname: string; buffer: Buffer }): Promise<{ url: string }> {
+  async addImage(tenantId: string, file: { originalname: string; buffer: Buffer }): Promise<{ url: string }> {
     if (!file) throw new BadRequestException('فایل تصویر انتخاب نشده است');
     const ext = path.extname(file.originalname).toLowerCase();
     const contentTypes: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.avif': 'image/avif' };
     if (!contentTypes[ext]) throw new BadRequestException('فرمت تصویر باید JPG، PNG، WebP یا AVIF باشد');
     if (!file.buffer?.length || file.buffer.length > 15 * 1024 * 1024) throw new BadRequestException('حجم تصویر حداکثر ۱۵ مگابایت است');
     const filename = `${randomUUID()}${ext}`;
-    const dir = path.join(this.storagePath(), 'cover-images');
+    const dir = this.tenantAssetDirectory('cover-images', tenantId);
     await fs.mkdir(dir, { recursive: true });
     await fs.writeFile(path.join(dir, filename), file.buffer);
-    return { url: `/publishing/settings/images/file/${filename}` };
+    return { url: `/publishing/settings/images/file/${tenantId}/${filename}` };
   }
 
-  async imageFile(filename: string): Promise<{ buffer: Buffer; contentType: string }> {
+  async imageFile(tenantId: string, filename: string): Promise<{ buffer: Buffer; contentType: string }> {
+    this.assertAssetPath(tenantId, filename, /\.(jpe?g|png|webp|avif)$/i);
+    const ext = path.extname(filename).toLowerCase();
+    const contentTypes: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.avif': 'image/avif' };
+    try { return { buffer: await fs.readFile(path.join(this.tenantAssetDirectory('cover-images', tenantId), filename)), contentType: contentTypes[ext] }; } catch { throw new NotFoundException(); }
+  }
+
+  async legacyImageFile(filename: string): Promise<{ buffer: Buffer; contentType: string }> {
     if (!/^[a-f0-9-]+\.(jpe?g|png|webp|avif)$/i.test(filename)) throw new NotFoundException();
     const ext = path.extname(filename).toLowerCase();
     const contentTypes: Record<string, string> = { '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp', '.avif': 'image/avif' };
     try { return { buffer: await fs.readFile(path.join(this.storagePath(), 'cover-images', filename)), contentType: contentTypes[ext] }; } catch { throw new NotFoundException(); }
+  }
+
+  private tenantAssetDirectory(kind: 'fonts' | 'cover-images', tenantId: string): string {
+    if (!/^[a-zA-Z0-9_-]{10,64}$/u.test(tenantId)) throw new NotFoundException();
+    return path.join(this.storagePath(), kind, tenantId);
+  }
+
+  private assertAssetPath(tenantId: string, filename: string, extension: RegExp): void {
+    if (!/^[a-zA-Z0-9_-]{10,64}$/u.test(tenantId) || !/^[a-f0-9-]+\.[a-z0-9]+$/iu.test(filename) || !extension.test(filename)) {
+      throw new NotFoundException();
+    }
   }
 
   async getRaw(tenantId: string): Promise<PublishingSettings> {

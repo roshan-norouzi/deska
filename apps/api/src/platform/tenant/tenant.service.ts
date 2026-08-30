@@ -5,11 +5,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { MODULE_CATALOG, TENANT_ROLES, normalizeEmployeeProfile, pickProvidedProfileFields } from '@deska/shared';
+import { MODULE_CATALOG, TENANT_ROLES, normalizeDigits, normalizeEmployeeProfile, pickProvidedProfileFields, type EmployeeProfileInput } from '@deska/shared';
 import { createHash, randomBytes } from 'crypto';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AuthService } from '../auth/auth.service';
 import { AcceptInviteDto } from './dto/accept-invite.dto';
 import { CreateTenantDto } from './dto/create-tenant.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
@@ -20,16 +19,22 @@ import {
   applyEmployeeProfileToUpdate,
   assertUniqueNationalId,
   assertValidEmployeeProfile,
-  resolveUserDisplayName,
 } from './employee-profile.helper';
 import { serializeEmployeeForApi } from './employee-profile-backfill';
 
+type InvitationWithTenant = Prisma.TenantInvitationGetPayload<{ include: { tenant: true } }>;
+
+interface InvitationEmployeeMetadata {
+  employeeCode?: string | null;
+  jobTitle?: string | null;
+  departmentId?: string | null;
+  hireDate?: string | null;
+  profile?: EmployeeProfileInput;
+}
+
 @Injectable()
 export class TenantService {
-  constructor(
-    private prisma: PrismaService,
-    private authService: AuthService,
-  ) {}
+  constructor(private prisma: PrismaService) {}
 
   async findAll(userId: string, isSuperAdmin: boolean) {
     if (isSuperAdmin) {
@@ -119,15 +124,6 @@ export class TenantService {
         });
       }
 
-      await tx.roleDefinition.create({
-        data: {
-          tenantId: created.id,
-          name: 'مدیر',
-          description: 'دسترسی کامل به سازمان',
-          isSystem: true,
-        },
-      });
-
       await tx.auditLog.create({
         data: {
           tenantId: created.id,
@@ -185,6 +181,89 @@ export class TenantService {
     });
   }
 
+  async searchPlatformUsers(tenantId: string, query: string, memberRole: string) {
+    this.assertAdmin(memberRole);
+    const normalizedQuery = query.trim().toLowerCase();
+    const normalizedPhone = normalizeDigits(query).replace(/[^0-9+]/g, '');
+    const rawPhone = query.trim().replace(/[\s()-]/g, '');
+    if (normalizedQuery.length < 5 && normalizedPhone.length < 5) {
+      throw new BadRequestException('برای جستجو حداقل ۵ کاراکتر وارد کنید');
+    }
+    const searchConditions: Prisma.UserWhereInput[] = [
+      { email: { contains: normalizedQuery, mode: 'insensitive' } },
+      ...(normalizedPhone.length >= 5 ? [{ phone: { contains: normalizedPhone } }] : []),
+      ...(normalizedPhone.startsWith('09')
+        ? [{ phone: { contains: `+98${normalizedPhone.slice(1)}` } }]
+        : []),
+      ...(normalizedPhone.startsWith('+98')
+        ? [{ phone: { contains: `0${normalizedPhone.slice(3)}` } }]
+        : []),
+      ...(rawPhone.length >= 5 && rawPhone !== normalizedPhone ? [{ phone: { contains: rawPhone } }] : []),
+    ];
+
+    const users = await this.prisma.user.findMany({
+      where: {
+        isActive: true,
+        status: 'active',
+        OR: searchConditions,
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        phone: true,
+        avatarUrl: true,
+        tenantMembers: { where: { tenantId }, select: { status: true } },
+        receivedInvitations: {
+          where: { tenantId, status: 'pending', expiresAt: { gt: new Date() } },
+          select: { id: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+      take: 12,
+    });
+
+    return users.map(({ tenantMembers, receivedInvitations, ...user }) => ({
+      ...user,
+      membershipStatus: tenantMembers[0]?.status ?? null,
+      pendingInvitationId: receivedInvitations[0]?.id ?? null,
+    }));
+  }
+
+  async listMyInvitations(userId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true },
+    });
+    if (!user) throw new NotFoundException('کاربر یافت نشد');
+
+    await this.prisma.tenantInvitation.updateMany({
+      where: {
+        status: 'pending',
+        expiresAt: { lt: new Date() },
+        OR: [{ invitedUserId: userId }, { email: user.email.toLowerCase() }],
+      },
+      data: { status: 'expired' },
+    });
+
+    return this.prisma.tenantInvitation.findMany({
+      where: {
+        status: 'pending',
+        expiresAt: { gt: new Date() },
+        tenant: { status: 'active', isActive: true },
+        OR: [{ invitedUserId: userId }, { email: user.email.toLowerCase() }],
+      },
+      select: {
+        id: true,
+        role: true,
+        expiresAt: true,
+        createdAt: true,
+        tenant: { select: { id: true, name: true, slug: true, plan: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
   async inviteMember(
     tenantId: string,
     dto: InviteMemberDto,
@@ -198,48 +277,46 @@ export class TenantService {
       throw new NotFoundException('سازمان یافت نشد');
     }
 
-    const email = dto.email.toLowerCase();
-
-    if (dto.password) {
-      const providedProfile = pickProvidedProfileFields(dto);
-      assertValidEmployeeProfile(providedProfile, { requireAll: false });
-      const displayName = resolveUserDisplayName(dto) || email.split('@')[0] || 'کارمند';
-
-      return this.createMemberWithAccount(tenantId, {
-        email,
-        name: displayName,
-        role: dto.role,
-        password: dto.password,
-        employeeCode: dto.employeeCode,
-        jobTitle: dto.jobTitle,
-        departmentId: dto.departmentId,
-        hireDate: dto.hireDate,
-        profile: dto,
-      });
+    if (dto.role === TENANT_ROLES.OWNER) {
+      throw new ForbiddenException('امکان تعیین نقش مالک از این مسیر وجود ندارد');
     }
 
-    const existingMember = await this.prisma.user.findUnique({
-      where: { email },
+    const invitedUser = await this.prisma.user.findFirst({
+      where: { id: dto.userId, isActive: true, status: 'active' },
+      select: { id: true, email: true, name: true, phone: true },
     });
+    if (!invitedUser) throw new NotFoundException('کاربر فعال پلتفرم یافت نشد');
 
-    if (existingMember) {
-      const membership = await this.prisma.tenantMember.findUnique({
-        where: {
-          tenantId_userId: { tenantId, userId: existingMember.id },
-        },
+    const membership = await this.prisma.tenantMember.findUnique({
+      where: { tenantId_userId: { tenantId, userId: invitedUser.id } },
+    });
+    if (membership) throw new ConflictException('این کاربر قبلاً عضو سازمان است');
+
+    const providedProfile = pickProvidedProfileFields(dto);
+    assertValidEmployeeProfile(providedProfile, { requireAll: false });
+
+    if (dto.departmentId) {
+      const department = await this.prisma.department.findFirst({
+        where: { id: dto.departmentId, tenantId },
+        select: { id: true },
       });
+      if (!department) throw new NotFoundException('واحد سازمانی یافت نشد');
+    }
 
-      if (membership) {
-        throw new ConflictException('این کاربر قبلاً عضو سازمان است');
-      }
+    if (dto.employeeCode?.trim()) {
+      const duplicateCode = await this.prisma.employee.findFirst({
+        where: { tenantId, employeeCode: dto.employeeCode.trim() },
+        select: { id: true },
+      });
+      if (duplicateCode) throw new ConflictException('این کد پرسنلی قبلاً استفاده شده است');
     }
 
     const pendingInvite = await this.prisma.tenantInvitation.findFirst({
       where: {
         tenantId,
-        email,
         status: 'pending',
         expiresAt: { gt: new Date() },
+        OR: [{ invitedUserId: invitedUser.id }, { email: invitedUser.email.toLowerCase() }],
       },
     });
 
@@ -254,121 +331,31 @@ export class TenantService {
     const invitation = await this.prisma.tenantInvitation.create({
       data: {
         tenantId,
-        email,
+        email: invitedUser.email.toLowerCase(),
+        invitedUserId: invitedUser.id,
         role: dto.role,
         token: tokenHash,
         tokenHash,
         status: 'pending',
         invitedByUserId,
         expiresAt,
+        metadata: {
+          employeeCode: dto.employeeCode?.trim() || null,
+          jobTitle: dto.jobTitle?.trim() || null,
+          departmentId: dto.departmentId || null,
+          hireDate: dto.hireDate || null,
+          profile: providedProfile,
+        } as unknown as Prisma.InputJsonValue,
       },
     });
 
     return {
       id: invitation.id,
       email: invitation.email,
+      user: invitedUser,
       role: invitation.role,
-      token,
       expiresAt: invitation.expiresAt,
     };
-  }
-
-  private async createMemberWithAccount(
-    tenantId: string,
-    data: {
-      email: string;
-      name: string;
-      role: string;
-      password: string;
-      employeeCode?: string;
-      jobTitle?: string;
-      departmentId?: string;
-      hireDate?: string;
-      profile: InviteMemberDto;
-    },
-  ) {
-    if (data.role === TENANT_ROLES.OWNER) {
-      throw new ForbiddenException('امکان تعیین نقش مالک از این مسیر وجود ندارد');
-    }
-
-    let user = await this.prisma.user.findUnique({ where: { email: data.email } });
-
-    if (user) {
-      const membership = await this.prisma.tenantMember.findUnique({
-        where: { tenantId_userId: { tenantId, userId: user.id } },
-      });
-      if (membership) {
-        throw new ConflictException('این کاربر قبلاً عضو سازمان است');
-      }
-      throw new ConflictException(
-        'برای کاربر موجود امکان تعیین رمز عبور وجود ندارد؛ دعوت‌نامه بدون رمز ارسال کنید',
-      );
-    } else {
-      user = await this.authService.registerUser({
-        email: data.email,
-        name: data.name,
-        password: data.password,
-      });
-    }
-
-    await this.prisma.tenantMember.create({
-      data: {
-        tenantId,
-        userId: user.id,
-        role: data.role,
-        status: 'active',
-        jobTitle: data.jobTitle,
-      },
-    });
-
-    const employee = await ensureEmployeeForUser(this.prisma, tenantId, user.id, new Date());
-
-    await assertUniqueNationalId(
-      this.prisma,
-      tenantId,
-      normalizeEmployeeProfile(pickProvidedProfileFields(data.profile)).nationalId,
-      employee.id,
-    );
-
-    const employeeUpdate: Prisma.EmployeeUpdateInput = {};
-    applyEmployeeProfileToUpdate(data.profile, employeeUpdate);
-
-    if (data.employeeCode) {
-      const duplicateCode = await this.prisma.employee.findFirst({
-        where: {
-          tenantId,
-          employeeCode: data.employeeCode,
-          NOT: { id: employee.id },
-        },
-      });
-      if (duplicateCode) {
-        throw new ConflictException('این کد پرسنلی قبلاً استفاده شده است');
-      }
-      employeeUpdate.employeeCode = data.employeeCode;
-    }
-    if (data.jobTitle) {
-      employeeUpdate.jobTitle = data.jobTitle;
-    }
-    if (data.departmentId) {
-      const department = await this.prisma.department.findFirst({
-        where: { id: data.departmentId, tenantId },
-      });
-      if (!department) {
-        throw new NotFoundException('واحد سازمانی یافت نشد');
-      }
-      employeeUpdate.department = { connect: { id: data.departmentId } };
-    }
-    if (data.hireDate) {
-      employeeUpdate.hireDate = new Date(data.hireDate);
-    }
-    if (Object.keys(employeeUpdate).length > 0) {
-      await this.prisma.employee.update({
-        where: { id: employee.id },
-        data: employeeUpdate,
-      });
-    }
-
-    return this.getMemberWithEmployee(tenantId, user.id);
   }
 
   async acceptInvite(userId: string, dto: AcceptInviteDto) {
@@ -380,10 +367,63 @@ export class TenantService {
       include: { tenant: true },
     });
 
-    if (!invitation) {
-      throw new NotFoundException('دعوت‌نامه یافت نشد');
+    if (!invitation) throw new NotFoundException('دعوت‌نامه یافت نشد');
+    return this.acceptResolvedInvitation(userId, invitation);
+  }
+
+  async acceptMyInvitation(userId: string, invitationId: string) {
+    const invitation = await this.prisma.tenantInvitation.findUnique({
+      where: { id: invitationId },
+      include: { tenant: true },
+    });
+    if (!invitation) throw new NotFoundException('دعوت‌نامه یافت نشد');
+    return this.acceptResolvedInvitation(userId, invitation);
+  }
+
+  async rejectMyInvitation(userId: string, invitationId: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, email: true },
+    });
+    if (!user) throw new NotFoundException('کاربر یافت نشد');
+
+    const invitation = await this.prisma.tenantInvitation.findUnique({
+      where: { id: invitationId },
+      select: {
+        id: true,
+        email: true,
+        invitedUserId: true,
+        status: true,
+        expiresAt: true,
+      },
+    });
+    if (!invitation) throw new NotFoundException('دعوت‌نامه یافت نشد');
+    if (
+      (invitation.invitedUserId && invitation.invitedUserId !== userId)
+      || (!invitation.invitedUserId && invitation.email.toLowerCase() !== user.email.toLowerCase())
+    ) {
+      throw new ForbiddenException('این دعوت‌نامه برای حساب کاربری شما صادر نشده است');
+    }
+    if (invitation.status !== 'pending') {
+      throw new BadRequestException('فقط دعوت‌نامه در انتظار قابل رد کردن است');
     }
 
+    const rejected = await this.prisma.tenantInvitation.updateMany({
+      where: {
+        id: invitation.id,
+        status: 'pending',
+        accepted: false,
+        expiresAt: { gt: new Date() },
+      },
+      data: { status: 'rejected' },
+    });
+    if (rejected.count !== 1) {
+      throw new BadRequestException('این دعوت‌نامه دیگر قابل رد کردن نیست');
+    }
+    return { success: true, invitationId: invitation.id, status: 'rejected' };
+  }
+
+  private async acceptResolvedInvitation(userId: string, invitation: InvitationWithTenant) {
     if (invitation.accepted || invitation.status === 'accepted') {
       throw new BadRequestException('این دعوت‌نامه قبلاً پذیرفته شده است');
     }
@@ -401,45 +441,97 @@ export class TenantService {
       throw new NotFoundException('کاربر یافت نشد');
     }
 
-    if (user.email.toLowerCase() !== invitation.email.toLowerCase()) {
+    if (invitation.invitedUserId && invitation.invitedUserId !== userId) {
+      throw new ForbiddenException('این دعوت‌نامه برای حساب کاربری شما صادر نشده است');
+    }
+    if (!invitation.invitedUserId && user.email.toLowerCase() !== invitation.email.toLowerCase()) {
       throw new ForbiddenException('این دعوت‌نامه برای ایمیل شما صادر نشده است');
     }
 
-    const existing = await this.prisma.tenantMember.findUnique({
-      where: { tenantId_userId: { tenantId: invitation.tenantId, userId } },
-    });
+    try {
+      return await this.prisma.$transaction(async (tx) => {
+        const existing = await tx.tenantMember.findUnique({
+          where: { tenantId_userId: { tenantId: invitation.tenantId, userId } },
+        });
+        if (existing) throw new ConflictException('شما قبلاً عضو این سازمان هستید');
 
-    if (existing) {
-      throw new ConflictException('شما قبلاً عضو این سازمان هستید');
-    }
+        const acceptedAt = new Date();
+        const claimed = await tx.tenantInvitation.updateMany({
+          where: {
+            id: invitation.id,
+            status: 'pending',
+            accepted: false,
+            revokedAt: null,
+            expiresAt: { gt: acceptedAt },
+            ...(invitation.invitedUserId
+              ? { invitedUserId: userId }
+              : { invitedUserId: null, email: user.email.toLowerCase() }),
+          },
+          data: { accepted: true, status: 'accepted', acceptedAt },
+        });
+        if (claimed.count !== 1) {
+          throw new BadRequestException('این دعوت‌نامه دیگر قابل پذیرش نیست');
+        }
 
-    await this.prisma.$transaction([
-      this.prisma.tenantMember.create({
-        data: {
-          tenantId: invitation.tenantId,
+        await tx.tenantMember.create({
+          data: {
+            tenantId: invitation.tenantId,
+            userId,
+            role: invitation.role,
+            status: 'active',
+            jobTitle: (invitation.metadata as unknown as InvitationEmployeeMetadata | null)?.jobTitle ?? null,
+          },
+        });
+
+        const employee = await ensureEmployeeForUser(
+          tx as unknown as PrismaService,
+          invitation.tenantId,
           userId,
+          acceptedAt,
+        );
+        await this.applyInvitationEmployeeMetadata(
+          tx as unknown as PrismaService,
+          invitation,
+          employee.id,
+        );
+
+        return {
+          tenantId: invitation.tenantId,
+          tenantName: invitation.tenant.name,
           role: invitation.role,
-          status: 'active',
-        },
-      }),
-      this.prisma.tenantInvitation.update({
-        where: { id: invitation.id },
-        data: { accepted: true, status: 'accepted', acceptedAt: new Date() },
-      }),
-    ]);
+        };
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('اطلاعات پرسنلی با یکی از کارمندان موجود تداخل دارد');
+      }
+      throw error;
+    }
+  }
 
-    await ensureEmployeeForUser(
-      this.prisma,
-      invitation.tenantId,
-      userId,
-      new Date(),
-    );
+  private async applyInvitationEmployeeMetadata(
+    prisma: PrismaService,
+    invitation: InvitationWithTenant,
+    employeeId: string,
+  ) {
+    const metadata = (invitation.metadata ?? {}) as unknown as InvitationEmployeeMetadata;
+    const profile = metadata.profile ?? {};
+    const update: Prisma.EmployeeUpdateInput = {};
 
-    return {
-      tenantId: invitation.tenantId,
-      tenantName: invitation.tenant.name,
-      role: invitation.role,
-    };
+    if (Object.keys(profile).length > 0) {
+      assertValidEmployeeProfile(profile, { requireAll: false });
+      const normalized = normalizeEmployeeProfile(profile);
+      await assertUniqueNationalId(prisma, invitation.tenantId, normalized.nationalId, employeeId);
+      applyEmployeeProfileToUpdate(profile, update);
+    }
+    if (metadata.employeeCode) update.employeeCode = metadata.employeeCode;
+    if (metadata.jobTitle) update.jobTitle = metadata.jobTitle;
+    if (metadata.departmentId) update.department = { connect: { id: metadata.departmentId } };
+    if (metadata.hireDate) update.hireDate = new Date(metadata.hireDate);
+
+    if (Object.keys(update).length > 0) {
+      await prisma.employee.update({ where: { id: employeeId }, data: update });
+    }
   }
 
   async listMembers(tenantId: string, requesterRole: string) {
@@ -575,27 +667,6 @@ export class TenantService {
       if (duplicateCode) {
         throw new ConflictException('این کد پرسنلی قبلاً استفاده شده است');
       }
-    }
-
-    if (dto.name || dto.firstName || dto.lastName) {
-      const displayName = resolveUserDisplayName(dto);
-      if (displayName) {
-        await this.prisma.user.update({
-          where: { id: userId },
-          data: { name: displayName },
-        });
-      }
-    }
-
-    if (dto.email) {
-      const normalizedEmail = dto.email.toLowerCase();
-      if (normalizedEmail !== member.user.email.toLowerCase()) {
-        throw new ForbiddenException('تغییر ایمیل ورود فقط توسط خود کاربر یا مدیر پلتفرم مجاز است');
-      }
-    }
-
-    if (dto.password) {
-      throw new ForbiddenException('بازنشانی رمز عبور از مدیریت سازمان مجاز نیست');
     }
 
     if (dto.role && member.role !== TENANT_ROLES.OWNER) {
@@ -753,6 +824,7 @@ export class TenantService {
       select: {
         id: true,
         email: true,
+        invitedUser: { select: { id: true, name: true, email: true, phone: true } },
         role: true,
         status: true,
         expiresAt: true,
@@ -809,49 +881,7 @@ export class TenantService {
         expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000),
       },
     });
-    return { id: updated.id, email: updated.email, role: updated.role, token, expiresAt: updated.expiresAt };
-  }
-
-  async transferOwnership(
-    tenantId: string,
-    targetUserId: string,
-    requesterUserId: string,
-    requesterRole: string,
-  ) {
-    if (requesterRole !== TENANT_ROLES.OWNER) {
-      throw new ForbiddenException('فقط مالک سازمان می‌تواند مالکیت اصلی را منتقل کند');
-    }
-    if (targetUserId === requesterUserId) {
-      throw new BadRequestException('کاربر مقصد هم‌اکنون مالک اصلی است');
-    }
-    const target = await this.prisma.tenantMember.findUnique({
-      where: { tenantId_userId: { tenantId, userId: targetUserId } },
-    });
-    if (!target || target.status !== 'active') {
-      throw new NotFoundException('عضو فعال مقصد یافت نشد');
-    }
-    await this.prisma.$transaction(async (tx) => {
-      await tx.tenantMember.update({
-        where: { tenantId_userId: { tenantId, userId: targetUserId } },
-        data: { role: TENANT_ROLES.OWNER, roleChangedAt: new Date() },
-      });
-      await tx.tenantMember.update({
-        where: { tenantId_userId: { tenantId, userId: requesterUserId } },
-        data: { role: TENANT_ROLES.ADMIN, roleChangedAt: new Date() },
-      });
-      await tx.tenant.update({ where: { id: tenantId }, data: { primaryOwnerUserId: targetUserId } });
-      await tx.auditLog.create({
-        data: {
-          tenantId,
-          userId: requesterUserId,
-          action: 'organization.ownership_transferred',
-          entityType: 'Tenant',
-          entityId: tenantId,
-          changes: { fromUserId: requesterUserId, toUserId: targetUserId },
-        },
-      });
-    });
-    return { success: true, primaryOwnerUserId: targetUserId };
+    return { id: updated.id, email: updated.email, role: updated.role, expiresAt: updated.expiresAt };
   }
 
   private hashInvitationToken(token: string) {

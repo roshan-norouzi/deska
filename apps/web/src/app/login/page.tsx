@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { PLATFORM_NAME, PLATFORM_TAGLINE } from '@deska/shared';
 import { useAuth } from '@/lib/auth-context';
+import { clearTenantId, setTenantId } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,17 +12,24 @@ import Link from 'next/link';
 
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isAuthenticated, isLoading } = useAuth();
+  const { login, user, isAuthenticated, isLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      router.replace('/dashboard');
+    if (!isLoading && isAuthenticated && user) {
+      const memberships = user.tenants ?? [];
+      if (user.pendingInvitations?.length || memberships.length !== 1) {
+        clearTenantId();
+        router.replace('/organizations');
+      } else {
+        setTenantId(memberships[0].id);
+        router.replace('/dashboard');
+      }
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated, user, router]);
 
   if (isLoading || isAuthenticated) {
     return (
@@ -38,7 +46,14 @@ export default function LoginPage() {
 
     try {
       const user = await login(email, password);
-      router.push(user.tenants?.length ? '/dashboard' : '/organizations');
+      const memberships = user.tenants ?? [];
+      if (user.pendingInvitations?.length || memberships.length !== 1) {
+        clearTenantId();
+        router.push('/organizations');
+      } else {
+        setTenantId(memberships[0].id);
+        router.push('/dashboard');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'خطا در ورود');
     } finally {

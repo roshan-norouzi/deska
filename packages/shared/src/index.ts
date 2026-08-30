@@ -128,7 +128,6 @@ export const APP_PERMISSIONS = [
   { key: 'dashboard.view', label: 'مشاهده داشبورد', moduleId: 'platform' },
   { key: 'settings.manage', label: 'مدیریت تنظیمات', moduleId: 'platform' },
   { key: 'users.manage', label: 'مدیریت کاربران', moduleId: 'platform' },
-  { key: 'roles.manage', label: 'مدیریت نقش‌ها', moduleId: 'platform' },
   { key: 'modules.manage', label: 'مدیریت ماژول‌ها', moduleId: 'platform' },
   // Contacts
   { key: 'contacts.view', label: 'مشاهده مخاطبین', moduleId: 'contacts' },
@@ -163,15 +162,14 @@ const VIEW_PERMISSIONS = APP_PERMISSIONS
   .filter((permission) => permission.endsWith('.view'));
 
 /**
- * Safe defaults for the built-in organizational roles. A tenant-specific role
- * definition with the same key/label can override these defaults at runtime.
+ * Safe defaults for the built-in organizational roles.
  */
 export const DEFAULT_TENANT_ROLE_PERMISSIONS: Record<TenantRole, readonly AppPermission[]> = {
   owner: APP_PERMISSIONS.map((permission) => permission.key),
   admin: APP_PERMISSIONS.map((permission) => permission.key),
   manager: APP_PERMISSIONS
     .map((permission) => permission.key)
-    .filter((permission) => !permission.startsWith('platform.') && !['users.manage', 'roles.manage', 'modules.manage', 'organization.owners.manage'].includes(permission)),
+    .filter((permission) => !permission.startsWith('platform.') && !['users.manage', 'modules.manage', 'organization.owners.manage'].includes(permission)),
   senior_specialist: [
     ...VIEW_PERMISSIONS,
     'contacts.create',

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ExternalLink, Pencil, Plus, RefreshCw, Trash2, Users, X } from 'lucide-react'
+import { ExternalLink, Pencil, Plus, RefreshCw, Search, Trash2, UserCheck, Users, X } from 'lucide-react'
 import {
   EMPLOYEE_STATUS,
   STATUS_LABELS,
@@ -88,6 +88,16 @@ interface OrganizationInvitation {
   status: string
   expiresAt: string
   createdAt: string
+  invitedUser?: { id: string; name: string; email: string; phone?: string | null } | null
+}
+
+interface PlatformUserSearchResult {
+  id: string
+  name: string
+  email: string
+  phone?: string | null
+  membershipStatus?: string | null
+  pendingInvitationId?: string | null
 }
 
 interface OrganizationEmployeesPanelProps {
@@ -130,7 +140,6 @@ const EMPTY_FORM: EmployeeMemberFormState = {
   departmentId: '',
   status: EMPLOYEE_STATUS.ACTIVE,
   hireDate: '',
-  password: '',
 }
 
 function roleBadgeVariant(role: string): 'default' | 'success' | 'warning' | 'info' {
@@ -193,7 +202,6 @@ function buildFormState(member: OrganizationMember): EmployeeMemberFormState {
     departmentId: emp?.department?.id ?? '',
     status: emp?.status ?? EMPLOYEE_STATUS.ACTIVE,
     hireDate: toDateInputValue(emp?.hireDate),
-    password: '',
   }
 }
 
@@ -224,7 +232,12 @@ export function OrganizationEmployeesPanel({
   >({})
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [requestSuccess, setRequestSuccess] = useState<string | null>(null)
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null)
+  const [userSearchQuery, setUserSearchQuery] = useState('')
+  const [userSearchResults, setUserSearchResults] = useState<PlatformUserSearchResult[]>([])
+  const [selectedPlatformUser, setSelectedPlatformUser] = useState<PlatformUserSearchResult | null>(null)
+  const [searchingUsers, setSearchingUsers] = useState(false)
 
   const members = Array.isArray(data) ? data : []
   const departments = Array.isArray(departmentsData) ? departmentsData : []
@@ -250,10 +263,14 @@ export function OrganizationEmployeesPanel({
     setFormState(null)
     setFieldErrors({})
     setSaveError(null)
+    setUserSearchQuery('')
+    setUserSearchResults([])
+    setSelectedPlatformUser(null)
   }
 
   const openAddModal = () => {
     setEditingMember(null)
+    setRequestSuccess(null)
     setModalMode('add')
   }
 
@@ -273,10 +290,6 @@ export function OrganizationEmployeesPanel({
       errors.email = 'ایمیل معتبر نیست'
     }
 
-    if (form.password && form.password.length < 12) {
-      errors.password = 'رمز عبور باید حداقل ۱۲ کاراکتر باشد'
-    }
-
     setFieldErrors(errors)
     return Object.keys(errors).length === 0
   }
@@ -288,6 +301,7 @@ export function OrganizationEmployeesPanel({
 
     setSaving(true)
     setSaveError(null)
+    let invitationSent = false
 
     const profile = buildProfilePayload(formState)
     const employeeCode = formState.employeeCode.trim()
@@ -295,11 +309,14 @@ export function OrganizationEmployeesPanel({
 
     try {
       if (modalMode === 'add') {
-        const invitation = await apiFetch<{ token?: string }>(`/tenants/${tenantId}/invite`, {
+        if (!selectedPlatformUser) {
+          setSaveError('ابتدا یک کاربر پلتفرم را جستجو و انتخاب کنید')
+          return
+        }
+        await apiFetch(`/tenants/${tenantId}/invite`, {
           method: 'POST',
           body: {
-            email: formState.email.trim(),
-            ...(formState.password ? { password: formState.password } : {}),
+            userId: selectedPlatformUser.id,
             role: formState.role,
             ...(employeeCode ? { employeeCode } : {}),
             ...(jobTitle ? { jobTitle } : {}),
@@ -308,17 +325,11 @@ export function OrganizationEmployeesPanel({
             ...profile,
           },
         })
-        if (invitation?.token) {
-          const inviteUrl = `${window.location.origin}/invitations/accept?token=${encodeURIComponent(invitation.token)}`
-          await navigator.clipboard?.writeText(inviteUrl)
-          window.alert('دعوت‌نامه ساخته شد و لینک پذیرش در کلیپ‌بورد کپی شد.')
-        }
+        invitationSent = true
       } else if (editingMember) {
         await apiFetch(`/tenants/${tenantId}/members/${editingMember.userId}`, {
           method: 'PATCH',
           body: {
-            email: formState.email.trim(),
-            ...(formState.password ? { password: formState.password } : {}),
             role: editingMember.role === TENANT_ROLES.OWNER ? undefined : formState.role,
             ...(employeeCode ? { employeeCode } : {}),
             ...(jobTitle ? { jobTitle } : {}),
@@ -332,11 +343,48 @@ export function OrganizationEmployeesPanel({
       closeModal()
       await refetch()
       await refetchInvitations()
+      if (invitationSent) {
+        setRequestSuccess('درخواست همکاری به پنل کاربر ارسال شد؛ عضویت پس از تأیید او فعال می‌شود.')
+      }
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'خطا در ذخیره')
     } finally {
       setSaving(false)
     }
+  }
+
+  const searchPlatformUsers = async () => {
+    if (!tenantId || userSearchQuery.trim().length < 5) {
+      setSaveError('برای جستجو حداقل ۵ کاراکتر از ایمیل یا شماره موبایل وارد کنید')
+      return
+    }
+    setSearchingUsers(true)
+    setSaveError(null)
+    try {
+      const results = await apiFetch<PlatformUserSearchResult[]>(
+        `/tenants/${tenantId}/users/search?q=${encodeURIComponent(userSearchQuery.trim())}`,
+      )
+      setUserSearchResults(results)
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'جستجوی کاربران انجام نشد')
+    } finally {
+      setSearchingUsers(false)
+    }
+  }
+
+  const selectPlatformUser = (platformUser: PlatformUserSearchResult) => {
+    if (platformUser.membershipStatus || platformUser.pendingInvitationId) return
+    const parsedName = splitPersianFullName(platformUser.name ?? '')
+    setSelectedPlatformUser(platformUser)
+    setFormState((current) => current && ({
+      ...current,
+      email: platformUser.email,
+      firstName: current.firstName || parsedName.firstName,
+      lastName: current.lastName || parsedName.lastName,
+      mobilePhone: current.mobilePhone || platformUser.phone || '',
+    }))
+    setUserSearchResults([])
+    setSaveError(null)
   }
 
   const revokeInvitation = async (id: string) => {
@@ -347,10 +395,8 @@ export function OrganizationEmployeesPanel({
 
   const resendInvitation = async (id: string) => {
     if (!tenantId) return
-    const result = await apiFetch<{ token: string }>(`/tenants/${tenantId}/invitations/${id}/resend`, { method: 'POST' })
-    const inviteUrl = `${window.location.origin}/invitations/accept?token=${encodeURIComponent(result.token)}`
-    await navigator.clipboard?.writeText(inviteUrl)
-    window.alert('لینک تازه دعوت در کلیپ‌بورد کپی شد.')
+    await apiFetch(`/tenants/${tenantId}/invitations/${id}/resend`, { method: 'POST' })
+    window.alert('دعوت همکاری تمدید شد و در حساب کاربر قابل مشاهده است.')
     await refetchInvitations()
   }
 
@@ -384,6 +430,11 @@ export function OrganizationEmployeesPanel({
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
+        </div>
+      )}
+      {requestSuccess && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+          {requestSuccess}
         </div>
       )}
 
@@ -482,7 +533,7 @@ export function OrganizationEmployeesPanel({
           <h3 className="font-semibold text-slate-900">دعوت‌نامه‌ها</h3>
           {invitations.map((invitation) => (
             <div key={invitation.id} className="flex flex-wrap items-center gap-2 rounded-lg bg-slate-50 p-3 text-sm">
-              <span className="min-w-0 flex-1" dir="ltr">{invitation.email}</span>
+              <span className="min-w-0 flex-1"><span className="block font-medium text-slate-800">{invitation.invitedUser?.name ?? 'کاربر پلتفرم'}</span><span className="block text-xs text-slate-500" dir="ltr">{invitation.email}</span></span>
               <Badge variant={invitation.status === 'pending' ? 'warning' : invitation.status === 'accepted' ? 'success' : 'default'}>{invitation.status}</Badge>
               {invitation.status === 'pending' && <><Button size="sm" variant="outline" onClick={() => void resendInvitation(invitation.id)}>ارسال مجدد</Button><Button size="sm" variant="danger" onClick={() => void revokeInvitation(invitation.id)}>لغو</Button></>}
             </div>
@@ -495,7 +546,7 @@ export function OrganizationEmployeesPanel({
           <div className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white shadow-xl">
             <div className="sticky top-0 z-10 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-4">
               <h3 className="text-lg font-semibold">
-                {modalMode === 'add' ? 'افزودن کارمند' : 'ویرایش مشخصات کارمند'}
+                {modalMode === 'add' ? 'دعوت کاربر به همکاری' : 'ویرایش مشخصات کارمند'}
               </h3>
               <button
                 type="button"
@@ -508,6 +559,32 @@ export function OrganizationEmployeesPanel({
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-4 px-6 py-5">
+              {modalMode === 'add' && (
+                <section className="space-y-3 rounded-xl border border-primary-100 bg-primary-50/40 p-4">
+                  <div>
+                    <h4 className="font-semibold text-slate-900">انتخاب کاربر پلتفرم</h4>
+                    <p className="mt-1 text-sm text-slate-500">کاربر باید قبلاً در پلتفرم ثبت‌نام کرده باشد. درخواست در پنل او نمایش داده می‌شود و فقط پس از تأیید، به همکاران سازمان اضافه خواهد شد.</p>
+                  </div>
+                  {selectedPlatformUser ? (
+                    <div className="flex items-center gap-3 rounded-xl border border-emerald-200 bg-white p-3">
+                      <UserCheck className="h-5 w-5 text-emerald-600" />
+                      <div className="min-w-0 flex-1"><p className="font-medium text-slate-900">{selectedPlatformUser.name}</p><p className="truncate text-xs text-slate-500" dir="ltr">{selectedPlatformUser.email}{selectedPlatformUser.phone ? ` · ${selectedPlatformUser.phone}` : ''}</p></div>
+                      <Button type="button" variant="outline" size="sm" onClick={() => { setSelectedPlatformUser(null); setFormState((current) => current && ({ ...current, email: '' })) }}>تغییر</Button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex gap-2">
+                        <input className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" dir="ltr" value={userSearchQuery} onChange={(event) => setUserSearchQuery(event.target.value)} placeholder="email@example.com یا 0912..." onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); void searchPlatformUsers() } }} />
+                        <Button type="button" onClick={() => void searchPlatformUsers()} isLoading={searchingUsers}><Search className="h-4 w-4" />جستجو</Button>
+                      </div>
+                      {userSearchResults.length > 0 && <div className="space-y-2">{userSearchResults.map((platformUser) => {
+                        const unavailable = !!platformUser.membershipStatus || !!platformUser.pendingInvitationId
+                        return <button key={platformUser.id} type="button" disabled={unavailable} onClick={() => selectPlatformUser(platformUser)} className="flex w-full items-center gap-3 rounded-xl border border-slate-200 bg-white p-3 text-right disabled:cursor-not-allowed disabled:opacity-50"><div className="min-w-0 flex-1"><p className="font-medium text-slate-900">{platformUser.name}</p><p className="truncate text-xs text-slate-500" dir="ltr">{platformUser.email}{platformUser.phone ? ` · ${platformUser.phone}` : ''}</p></div>{unavailable && <Badge variant="default">{platformUser.membershipStatus ? 'عضو سازمان' : 'دعوت شده'}</Badge>}</button>
+                      })}</div>}
+                    </>
+                  )}
+                </section>
+              )}
               <EmployeeMemberFormFields
                 formState={formState}
                 setFormState={setFormState}
@@ -524,7 +601,7 @@ export function OrganizationEmployeesPanel({
                   انصراف
                 </Button>
                 <Button type="submit" isLoading={saving}>
-                  {modalMode === 'add' ? 'ایجاد کارمند' : 'ذخیره'}
+                  {modalMode === 'add' ? 'ارسال درخواست همکاری' : 'ذخیره'}
                 </Button>
               </div>
             </form>

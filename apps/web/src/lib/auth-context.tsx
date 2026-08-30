@@ -12,6 +12,7 @@ import {
 import { PLATFORM_ROLES } from '@deska/shared';
 import {
   apiFetch,
+  clearTenantId,
   clearTokens,
   withBasePath,
   type ApiFetchOptions,
@@ -23,8 +24,17 @@ export interface AuthUser {
   name: string;
   role: string;
   avatarUrl?: string | null;
+  phone?: string | null;
   isActive?: boolean;
   tenants?: TenantMembership[];
+  pendingInvitations?: PendingTenantInvitation[];
+}
+
+export interface PendingTenantInvitation {
+  id: string;
+  role: string;
+  expiresAt: string;
+  tenant: { id: string; name: string; slug: string; plan: string };
 }
 
 export interface TenantMembership {
@@ -115,6 +125,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     clearTokens();
+    clearTenantId();
     setUser(null);
     try {
       await fetch(withBasePath('/api/auth/logout'), {

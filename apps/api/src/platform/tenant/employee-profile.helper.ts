@@ -2,7 +2,6 @@ import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import {
   EmployeeProfileInput,
-  formatEmployeeFullName,
   normalizeEmployeeProfile,
   pickProvidedProfileFields,
   validateEmployeeProfile,
@@ -82,15 +81,4 @@ export async function assertUniqueNationalId(
   if (duplicate) {
     throw new ConflictException('این کد ملی قبلاً برای کارمند دیگری ثبت شده است');
   }
-}
-
-export function resolveUserDisplayName(
-  dto: EmployeeProfileDtoShape & { name?: string },
-): string | undefined {
-  const fromProfile = formatEmployeeFullName({
-    firstName: dto.firstName,
-    lastName: dto.lastName,
-  });
-  if (fromProfile) return fromProfile;
-  return dto.name?.trim() || undefined;
 }

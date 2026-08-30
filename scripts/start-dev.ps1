@@ -219,17 +219,42 @@ function Wait-PostgresReady {
     return $false
 }
 
+function Get-PortListenerProcessIds {
+    param([int]$Port)
+
+    $ownerIds = @()
+    try {
+        $ownerIds = @(
+            Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction Stop |
+                Select-Object -ExpandProperty OwningProcess -Unique
+        )
+    } catch {
+        # Get-NetTCPConnection may require elevated permissions on some Windows
+        # installations. netstat remains readable for a regular desktop user.
+    }
+
+    if ($ownerIds.Count -eq 0) {
+        foreach ($line in @(netstat.exe -ano -p tcp 2>$null)) {
+            if ($line -match "^\s*TCP\s+\S+:$Port\s+\S+\s+LISTENING\s+(\d+)\s*$") {
+                $ownerIds += [int]$Matches[1]
+            }
+        }
+    }
+
+    return @($ownerIds | Where-Object { $_ -gt 0 } | Select-Object -Unique)
+}
+
 function Stop-PortListeners {
     param([int[]]$Ports)
 
     foreach ($port in $Ports) {
         for ($attempt = 1; $attempt -le 5; $attempt++) {
-            $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
-            if (-not $conns) { break }
+            $ownerIds = @(Get-PortListenerProcessIds -Port $port)
+            if ($ownerIds.Count -eq 0) { break }
 
             if ($attempt -eq 1) { Write-Host "Freeing port $port..." -ForegroundColor Yellow }
             $processRows = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue)
-            foreach ($ownerId in @($conns | Select-Object -ExpandProperty OwningProcess -Unique)) {
+            foreach ($ownerId in $ownerIds) {
                 $treeRootId = [int]$ownerId
                 $currentId = [int]$ownerId
                 for ($depth = 0; $depth -lt 8; $depth++) {
@@ -245,7 +270,7 @@ function Stop-PortListeners {
             Start-Sleep -Milliseconds 700
         }
 
-        if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
+        if (@(Get-PortListenerProcessIds -Port $port).Count -gt 0) {
             throw "Port $port is still occupied after cleanup."
         }
     }

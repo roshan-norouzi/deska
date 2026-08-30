@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, FileText, Calendar, UserCheck, User, Building2, Settings, ShieldCheck, Puzzle, FolderKanban, Send, Rss, type LucideIcon } from 'lucide-react';
+import { LayoutDashboard, Users, FileText, Calendar, UserCheck, User, Building2, Settings, Puzzle, FolderKanban, Send, Rss, type LucideIcon } from 'lucide-react';
 import { MODULE_DOMAINS } from '@deska/shared';
 
 export interface NavItem { href: string; label: string; icon: LucideIcon; moduleId?: string; superAdminOnly?: boolean; }
@@ -26,7 +26,6 @@ export const NAV_GROUPS: NavGroup[] = [
   { id: 'settings', label: 'تنظیمات', domain: MODULE_DOMAINS.PLATFORM, items: [
     { href: '/settings', label: 'تنظیمات سازمان', icon: Settings },
     { href: '/settings/account', label: 'حساب کاربری', icon: User },
-    { href: '/settings/roles', label: 'نقش‌ها', icon: ShieldCheck },
     { href: '/settings/modules', label: 'ماژول‌ها', icon: Puzzle },
     { href: '/settings/observances', label: 'مناسبت‌های تقویم', icon: Calendar, superAdminOnly: true },
     { href: '/platform', label: 'مدیریت پلتفرم', icon: Building2, superAdminOnly: true },

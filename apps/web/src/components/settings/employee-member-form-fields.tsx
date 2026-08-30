@@ -46,7 +46,6 @@ export interface EmployeeMemberFormState {
   departmentId: string
   status: string
   hireDate: string
-  password: string
 }
 
 interface DepartmentOption {
@@ -61,7 +60,7 @@ interface EmployeeMemberFormFieldsProps {
   isOwner: boolean
   departments: DepartmentOption[]
   fieldErrors: Partial<
-    Record<EmployeeProfileField | 'email' | 'password' | 'employeeCode', string>
+    Record<EmployeeProfileField | 'email' | 'employeeCode', string>
   >
 }
 
@@ -321,24 +320,14 @@ export function EmployeeMemberFormFields({
         <SectionTitle>حساب کاربری و سازمان</SectionTitle>
         <div className="grid gap-4 sm:grid-cols-2">
           <Input
-            label="ایمیل"
+            label="ایمیل حساب کاربری پلتفرم"
             type="email"
             value={formState.email}
-            onChange={(e) => set('email', e.target.value)}
+            readOnly
             error={fieldErrors.email}
             dir="ltr"
-            className="text-left"
+            className="bg-slate-50 text-left"
             required={mode === 'add'}
-          />
-          <Input
-            label={mode === 'add' ? 'رمز عبور اولیه (اختیاری)' : 'رمز عبور جدید (اختیاری)'}
-            type="password"
-            value={formState.password}
-            onChange={(e) => set('password', e.target.value)}
-            error={fieldErrors.password}
-            placeholder="در صورت خالی بودن، دعوت‌نامه ساخته می‌شود"
-            minLength={12}
-            autoComplete={mode === 'add' ? 'new-password' : 'off'}
           />
         </div>
 

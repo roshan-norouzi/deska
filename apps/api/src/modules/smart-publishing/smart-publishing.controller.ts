@@ -50,7 +50,7 @@ export class SmartPublishingController {
   @Post('settings/test-social/:network') @RequirePermission('publishing.settings') async testSocial(@TenantCtx() tenant: TenantContext, @Param('network') network: string, @Body() body: UpdatePublishingSettingsDto) { return this.socialPublisher.testConnection(tenant.tenantId, network, this.settingsService.mergeForTest(await this.settingsService.getRaw(tenant.tenantId), body)); }
   @Post('settings/fonts') @RequirePermission('publishing.settings') @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } })) uploadFont(@TenantCtx() tenant: TenantContext, @UploadedFile() file: { originalname: string; buffer: Buffer }, @Body('name') name?: string) { return this.settingsService.addFont(tenant.tenantId, file, name); }
   @Delete('settings/fonts/:id') @RequirePermission('publishing.settings') removeFont(@TenantCtx() tenant: TenantContext, @Param('id') id: string) { return this.settingsService.removeFont(tenant.tenantId, id).then(() => ({ ok: true })); }
-  @Post('settings/images') @RequirePermission('publishing.settings') @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } })) uploadCoverImage(@UploadedFile() file: { originalname: string; buffer: Buffer }) { return this.settingsService.addImage(file); }
+  @Post('settings/images') @RequirePermission('publishing.settings') @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 15 * 1024 * 1024 } })) uploadCoverImage(@TenantCtx() tenant: TenantContext, @UploadedFile() file: { originalname: string; buffer: Buffer }) { return this.settingsService.addImage(tenant.tenantId, file); }
 
   @Get('channels') channels(@TenantCtx() tenant: TenantContext) { return this.service.channels(tenant.tenantId); }
   @Post('channels') @RequirePermission('publishing.manage') createChannel(@TenantCtx() tenant: TenantContext, @Body() body: CreatePublishChannelDto) { return this.service.createChannel(tenant.tenantId, body); }
@@ -108,8 +108,14 @@ export class SmartPublishingController {
 @Controller('publishing/settings/fonts/file')
 export class PublishingFontFileController {
   constructor(private readonly settingsService: PublishingSettingsService) {}
+  @Get(':tenantId/:filename') async tenantFile(@Param('tenantId') tenantId: string, @Param('filename') filename: string, @Res() response: Response) {
+    const result = await this.settingsService.fontFile(tenantId, filename);
+    response.setHeader('Content-Type', result.contentType);
+    response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return response.send(result.buffer);
+  }
   @Get(':filename') async file(@Param('filename') filename: string, @Res() response: Response) {
-    const result = await this.settingsService.fontFile(filename);
+    const result = await this.settingsService.legacyFontFile(filename);
     response.setHeader('Content-Type', result.contentType);
     response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     return response.send(result.buffer);
@@ -120,8 +126,14 @@ export class PublishingFontFileController {
 @Controller('publishing/settings/images/file')
 export class PublishingImageFileController {
   constructor(private readonly settingsService: PublishingSettingsService) {}
+  @Get(':tenantId/:filename') async tenantFile(@Param('tenantId') tenantId: string, @Param('filename') filename: string, @Res() response: Response) {
+    const result = await this.settingsService.imageFile(tenantId, filename);
+    response.setHeader('Content-Type', result.contentType);
+    response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    return response.send(result.buffer);
+  }
   @Get(':filename') async file(@Param('filename') filename: string, @Res() response: Response) {
-    const result = await this.settingsService.imageFile(filename);
+    const result = await this.settingsService.legacyImageFile(filename);
     response.setHeader('Content-Type', result.contentType);
     response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     return response.send(result.buffer);

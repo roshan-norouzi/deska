@@ -1,13 +1,18 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PLATFORM_ROLES, TENANT_ROLES } from '@deska/shared';
 import { Prisma } from '@prisma/client';
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
 import type { AuthUser } from '../../common/decorators/params.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
+import type { DeletePlatformEntityDto } from './dto/delete-platform-entity.dto';
 
 type ListQuery = { q?: string; status?: string; role?: string; page?: string; limit?: string };
 
 @Injectable()
 export class PlatformAdminService {
+  private readonly logger = new Logger(PlatformAdminService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async overview(actor: AuthUser) {
@@ -130,6 +135,71 @@ export class PlatformAdminService {
     return { id: user.id, role: user.role };
   }
 
+  async deleteUser(actor: AuthUser, id: string, confirmation: DeletePlatformEntityDto) {
+    this.assertAdmin(actor);
+    if (id === actor.id) throw new BadRequestException('حذف حساب کاربری فعال خودتان مجاز نیست');
+
+    const target = await this.prisma.user.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        email: true,
+        role: true,
+        primaryOwnedTenants: { select: { id: true, name: true } },
+      },
+    });
+    if (!target) throw new NotFoundException('کاربر یافت نشد');
+    this.assertCanManageTarget(actor, target.role);
+    this.assertDeleteConfirmation(confirmation, target.email);
+
+    if (target.primaryOwnedTenants.length > 0) {
+      throw new BadRequestException('پیش از حذف کاربر، مالکیت همه سازمان‌های او را منتقل کنید');
+    }
+    if (target.role === PLATFORM_ROLES.SUPER_ADMIN) {
+      const superAdminCount = await this.prisma.user.count({
+        where: { role: PLATFORM_ROLES.SUPER_ADMIN, isActive: true, status: 'active' },
+      });
+      if (superAdminCount <= 1) throw new BadRequestException('آخرین مدیر کل فعال قابل حذف نیست');
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.projectMember.deleteMany({ where: { userId: id } });
+      await tx.project.updateMany({ where: { managerId: id }, data: { managerId: null } });
+      await tx.task.updateMany({ where: { assigneeId: id }, data: { assigneeId: null } });
+      await tx.approvalStep.deleteMany({ where: { approverId: id } });
+      await tx.publishArticle.updateMany({ where: { createdById: id }, data: { createdById: null } });
+      await tx.tenantInvitation.updateMany({ where: { invitedByUserId: id }, data: { invitedByUserId: null } });
+      await tx.tenantInvitation.deleteMany({
+        where: {
+          OR: [
+            { invitedUserId: id },
+            { email: { equals: target.email, mode: 'insensitive' } },
+          ],
+        },
+      });
+      await tx.documentFile.updateMany({ where: { uploadedById: id }, data: { uploadedById: null } });
+      await tx.calendarEvent.updateMany({ where: { createdById: id }, data: { createdById: null } });
+      await tx.calendarEventAttendee.deleteMany({ where: { userId: id } });
+      await tx.department.updateMany({ where: { managerId: id }, data: { managerId: null } });
+      await tx.auditLog.deleteMany({
+        where: { entityType: 'User', entityId: id },
+      });
+      await tx.user.delete({ where: { id } });
+      await tx.auditLog.create({
+        data: {
+          tenantId: null,
+          userId: actor.id,
+          action: 'platform.user_deleted',
+          entityType: 'User',
+          entityId: id,
+          changes: { permanentlyDeleted: true },
+        },
+      });
+    });
+
+    return { success: true, deletedUserId: id };
+  }
+
   async listOrganizations(actor: AuthUser, query: ListQuery) {
     this.assertAdmin(actor);
     const { skip, take, page } = this.pagination(query);
@@ -183,24 +253,83 @@ export class PlatformAdminService {
     return { id: updated.id, status: updated.status, isActive: updated.isActive };
   }
 
-  async transferOwnership(actor: AuthUser, tenantId: string, targetUserId: string) {
+  async deleteOrganization(actor: AuthUser, id: string, confirmation: DeletePlatformEntityDto) {
     this.assertAdmin(actor);
-    const [tenant, target] = await Promise.all([
-      this.prisma.tenant.findUnique({ where: { id: tenantId } }),
-      this.prisma.tenantMember.findUnique({ where: { tenantId_userId: { tenantId, userId: targetUserId } } }),
-    ]);
-    if (!tenant) throw new NotFoundException('سازمان یافت نشد');
-    if (!target || target.status !== 'active') throw new NotFoundException('عضو فعال مقصد یافت نشد');
-    if (tenant.primaryOwnerUserId === targetUserId) throw new BadRequestException('این کاربر هم‌اکنون مالک اصلی است');
-    await this.prisma.$transaction(async (tx) => {
-      if (tenant.primaryOwnerUserId) {
-        const current = await tx.tenantMember.findUnique({ where: { tenantId_userId: { tenantId, userId: tenant.primaryOwnerUserId } } });
-        if (current) await tx.tenantMember.update({ where: { tenantId_userId: { tenantId, userId: current.userId } }, data: { role: TENANT_ROLES.ADMIN, roleChangedAt: new Date() } });
-      }
-      await tx.tenantMember.update({ where: { tenantId_userId: { tenantId, userId: targetUserId } }, data: { role: TENANT_ROLES.OWNER, roleChangedAt: new Date() } });
-      await tx.tenant.update({ where: { id: tenantId }, data: { primaryOwnerUserId: targetUserId } });
-      await tx.auditLog.create({ data: { tenantId, userId: actor.id, action: 'platform.organization_ownership_transferred', entityType: 'Tenant', entityId: tenantId, changes: { fromUserId: tenant.primaryOwnerUserId, toUserId: targetUserId } } });
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        primaryOwner: { select: { role: true } },
+      },
     });
+    if (!tenant) throw new NotFoundException('سازمان یافت نشد');
+    if (tenant.primaryOwner?.role === PLATFORM_ROLES.SUPER_ADMIN && actor.role !== PLATFORM_ROLES.SUPER_ADMIN) {
+      throw new ForbiddenException('حذف سازمان متعلق به مدیر کل فقط توسط مدیر کل مجاز است');
+    }
+    this.assertDeleteConfirmation(confirmation, tenant.slug);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.tenant.delete({ where: { id } });
+      await tx.auditLog.create({
+        data: {
+          tenantId: null,
+          userId: actor.id,
+          action: 'platform.organization_deleted',
+          entityType: 'Tenant',
+          entityId: id,
+          changes: { deletedName: tenant.name, deletedSlug: tenant.slug },
+        },
+      });
+    });
+
+    const storageCleanupComplete = await this.cleanupOrganizationStorage(id);
+
+    return { success: true, deletedOrganizationId: id, storageCleanupComplete };
+  }
+
+  async transferOwnership(actor: AuthUser, tenantId: string, targetUserId: string) {
+    this.assertSuperAdmin(actor);
+    await this.prisma.$transaction(async (tx) => {
+      const tenant = await tx.tenant.findUnique({ where: { id: tenantId } });
+      if (!tenant) throw new NotFoundException('سازمان یافت نشد');
+
+      const target = await tx.tenantMember.findUnique({
+        where: { tenantId_userId: { tenantId, userId: targetUserId } },
+        include: { user: { select: { isActive: true, status: true } } },
+      });
+      if (!target || target.status !== 'active' || !target.user.isActive || target.user.status !== 'active') {
+        throw new NotFoundException('عضو فعال مقصد یافت نشد');
+      }
+      if (tenant.primaryOwnerUserId === targetUserId) {
+        throw new BadRequestException('این کاربر هم‌اکنون مالک اصلی است');
+      }
+
+      const changedAt = new Date();
+      await tx.tenantMember.updateMany({
+        where: { tenantId, role: TENANT_ROLES.OWNER, userId: { not: targetUserId } },
+        data: { role: TENANT_ROLES.ADMIN, roleChangedAt: changedAt },
+      });
+      await tx.tenantMember.update({
+        where: { tenantId_userId: { tenantId, userId: targetUserId } },
+        data: { role: TENANT_ROLES.OWNER, roleChangedAt: changedAt },
+      });
+      await tx.tenant.update({
+        where: { id: tenantId },
+        data: { primaryOwnerUserId: targetUserId },
+      });
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          userId: actor.id,
+          action: 'platform.organization_ownership_transferred',
+          entityType: 'Tenant',
+          entityId: tenantId,
+          changes: { fromUserId: tenant.primaryOwnerUserId, toUserId: targetUserId },
+        },
+      });
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
     return { success: true, primaryOwnerUserId: targetUserId };
   }
 
@@ -214,6 +343,51 @@ export class PlatformAdminService {
     if (targetRole === PLATFORM_ROLES.SUPER_ADMIN && actor.role !== PLATFORM_ROLES.SUPER_ADMIN) {
       throw new ForbiddenException('مدیریت حساب مدیر کل مجاز نیست');
     }
+  }
+
+  private assertSuperAdmin(actor: AuthUser) {
+    if (actor.role !== PLATFORM_ROLES.SUPER_ADMIN) {
+      throw new ForbiddenException('فقط مدیر کل سیستم می‌تواند مالکیت سازمان را منتقل کند');
+    }
+  }
+
+  private assertDeleteConfirmation(confirmation: DeletePlatformEntityDto, expectedText: string) {
+    if (!confirmation.confirmIrreversible || !confirmation.confirmCascade) {
+      throw new BadRequestException('هر سه مرحله تأیید حذف باید تکمیل شوند');
+    }
+    if (confirmation.confirmationText.trim() !== expectedText) {
+      throw new BadRequestException('متن تأیید حذف صحیح نیست');
+    }
+  }
+
+  private async cleanupOrganizationStorage(tenantId: string): Promise<boolean> {
+    const configuredRoot = process.env.STORAGE_PATH?.trim();
+    const roots = configuredRoot
+      ? [path.resolve(configuredRoot)]
+      : [path.resolve(process.cwd(), 'storage'), path.resolve(process.cwd(), 'uploads')];
+
+    try {
+      for (const root of roots) {
+        await fs.rm(this.safeChildPath(root, tenantId), { recursive: true, force: true });
+        await fs.rm(this.safeChildPath(root, path.join('fonts', tenantId)), { recursive: true, force: true });
+        await fs.rm(this.safeChildPath(root, path.join('cover-images', tenantId)), { recursive: true, force: true });
+      }
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(`Organization ${tenantId} was deleted, but storage cleanup needs attention: ${message}`);
+      return false;
+    }
+  }
+
+  private safeChildPath(root: string, child: string): string {
+    const resolvedRoot = path.resolve(root);
+    const resolvedChild = path.resolve(resolvedRoot, child);
+    const relative = path.relative(resolvedRoot, resolvedChild);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new BadRequestException('مسیر پاک‌سازی فضای ذخیره‌سازی معتبر نیست');
+    }
+    return resolvedChild;
   }
 
   private pagination(query: ListQuery) {

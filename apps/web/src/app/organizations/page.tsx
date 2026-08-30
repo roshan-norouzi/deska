@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Building2, Crown, Plus, Users } from 'lucide-react';
+import { ArrowLeft, Building2, Crown, Mail, Plus, Users, X } from 'lucide-react';
 import { TENANT_ROLE_LABELS, type TenantRole } from '@deska/shared';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +23,8 @@ export default function OrganizationsPage() {
   const [slug, setSlug] = useState('');
   const [plan, setPlan] = useState('starter');
   const [creating, setCreating] = useState(false);
+  const [acceptingInvitationId, setAcceptingInvitationId] = useState<string | null>(null);
+  const [rejectingInvitationId, setRejectingInvitationId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const memberships = useMemo(() => {
@@ -37,6 +39,41 @@ export default function OrganizationsPage() {
   const enterWorkspace = (tenantId: string) => {
     setActiveTenant(tenantId);
     router.push('/dashboard');
+  };
+
+  const rejectInvitation = async (invitationId: string) => {
+    if (!window.confirm('این دعوت همکاری رد شود؟')) return;
+    setRejectingInvitationId(invitationId);
+    setError(null);
+    try {
+      await apiFetch(`/tenants/my-invitations/${invitationId}/reject`, {
+        method: 'POST',
+        skipTenant: true,
+      });
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'رد دعوت انجام نشد.');
+    } finally {
+      setRejectingInvitationId(null);
+    }
+  };
+
+  const acceptInvitation = async (invitationId: string) => {
+    setAcceptingInvitationId(invitationId);
+    setError(null);
+    try {
+      const result = await apiFetch<{ tenantId: string }>(`/tenants/my-invitations/${invitationId}/accept`, {
+        method: 'POST',
+        skipTenant: true,
+      });
+      await Promise.all([refresh(), refreshTenants()]);
+      setActiveTenant(result.tenantId);
+      router.push('/dashboard');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'پذیرش دعوت انجام نشد.');
+    } finally {
+      setAcceptingInvitationId(null);
+    }
   };
 
   const createOrganization = async (event: React.FormEvent) => {
@@ -68,6 +105,30 @@ export default function OrganizationsPage() {
             <div><h1 className="text-2xl font-bold">سازمان‌های من</h1><p className="mt-2 text-sm leading-6 text-slate-300">عضویت‌های خود را ببینید، میان میزکارها جابه‌جا شوید یا سازمان تازه‌ای ایجاد کنید.</p></div>
           </div>
         </section>
+
+        {!!user?.pendingInvitations?.length && (
+          <Card className="border-primary-200 bg-primary-50/40">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Mail className="h-5 w-5 text-primary-700" />دعوت‌های همکاری</CardTitle>
+              <CardDescription>سازمان‌های زیر از شما دعوت کرده‌اند به‌عنوان همکار به میزکارشان بپیوندید.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {user.pendingInvitations.map((invitation) => (
+                <article key={invitation.id} className="flex flex-col gap-3 rounded-2xl border border-primary-100 bg-white p-4 sm:flex-row sm:items-center">
+                  <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary-100 text-primary-700"><Building2 className="h-5 w-5" /></span>
+                  <div className="min-w-0 flex-1">
+                    <h3 className="font-semibold text-slate-900">{invitation.tenant.name}</h3>
+                    <p className="mt-1 text-xs text-slate-500">دعوت به‌عنوان {TENANT_ROLE_LABELS[invitation.role as TenantRole] ?? invitation.role}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button variant="outline" onClick={() => void rejectInvitation(invitation.id)} isLoading={rejectingInvitationId === invitation.id}><X className="h-4 w-4" />رد دعوت</Button>
+                    <Button onClick={() => void acceptInvitation(invitation.id)} isLoading={acceptingInvitationId === invitation.id}>پذیرش و ورود به سازمان <ArrowLeft className="h-4 w-4" /></Button>
+                  </div>
+                </article>
+              ))}
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
           <Card>

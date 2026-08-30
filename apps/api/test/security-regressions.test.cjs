@@ -5,24 +5,19 @@ const assert = require('node:assert/strict');
 const { ForbiddenException, NotFoundException, UnauthorizedException } = require('@nestjs/common');
 const { TenantGuard } = require('../dist/common/guards/tenant.guard');
 const { TenantController } = require('../dist/platform/tenant/tenant.controller');
+const { TenantService } = require('../dist/platform/tenant/tenant.service');
+const { PlatformAdminService } = require('../dist/platform/admin/platform-admin.service');
 const { CalendarService } = require('../dist/modules/calendar/calendar.service');
 const { PublishingSettingsService } = require('../dist/modules/smart-publishing/publishing-settings.service');
 const { AuthService } = require('../dist/platform/auth/auth.service');
 const { JwtStrategy } = require('../dist/common/strategies/jwt.strategy');
 const { NotificationService } = require('../dist/common/services/audit.service');
-const { getDefaultPermissionsForTenantRole } = require('@deska/shared');
+const { APP_PERMISSIONS, getDefaultPermissionsForTenantRole } = require('@deska/shared');
 
 test('TenantGuard resolves permissions only inside the active tenant', async () => {
-  let roleLookup;
   const prisma = {
     tenantMember: {
       findUnique: async () => ({ role: 'member', tenant: { isActive: true } }),
-    },
-    roleDefinition: {
-      findFirst: async (query) => {
-        roleLookup = query;
-        return { permissions: [{ permission: 'contacts.view' }] };
-      },
     },
   };
   const config = { get: (_key, fallback) => fallback };
@@ -35,8 +30,7 @@ test('TenantGuard resolves permissions only inside the active tenant', async () 
   const result = await new TenantGuard(prisma, config).canActivate(context);
 
   assert.equal(result, true);
-  assert.equal(roleLookup.where.tenantId, 'tenant-a');
-  assert.deepEqual(request.user.permissions, ['contacts.view']);
+  assert.deepEqual(request.user.permissions, getDefaultPermissionsForTenantRole('member'));
   assert.deepEqual(request.tenant, { tenantId: 'tenant-a', memberRole: 'member' });
 });
 
@@ -84,6 +78,108 @@ test('tenant route id cannot differ from the active tenant header', () => {
   assert.throws(
     () => controller.update('tenant-b', {}, { tenantId: 'tenant-a', memberRole: 'owner' }),
     ForbiddenException,
+  );
+});
+
+test('platform-user search is restricted to tenant administrators', async () => {
+  const prisma = {
+    user: { findMany: () => assert.fail('unauthorized searches must not reach the database') },
+  };
+  const service = new TenantService(prisma);
+
+  await assert.rejects(
+    () => service.searchPlatformUsers('tenant-a', 'user@example.com', 'member'),
+    ForbiddenException,
+  );
+});
+
+test('an organization invitation can only be accepted by its target platform user', async () => {
+  const invitation = {
+    id: 'invitation-a',
+    tenantId: 'tenant-a',
+    invitedUserId: 'target-user',
+    email: 'target@example.com',
+    role: 'member',
+    status: 'pending',
+    accepted: false,
+    revokedAt: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    metadata: {},
+    tenant: { id: 'tenant-a', name: 'Tenant A' },
+  };
+  const prisma = {
+    tenantInvitation: { findUnique: async () => invitation },
+    user: { findUnique: async () => ({ id: 'attacker-user', email: 'attacker@example.com' }) },
+    tenantMember: {
+      findUnique: () => assert.fail('authorization must happen before membership lookup'),
+    },
+  };
+  const service = new TenantService(prisma);
+
+  await assert.rejects(
+    () => service.acceptMyInvitation('attacker-user', invitation.id),
+    (error) => error instanceof ForbiddenException
+      && error.message === 'این دعوت‌نامه برای حساب کاربری شما صادر نشده است',
+  );
+});
+
+test('an organization invitation can only be rejected by its target platform user', async () => {
+  let updateAttempted = false;
+  const invitation = {
+    id: 'invitation-a',
+    invitedUserId: 'target-user',
+    email: 'target@example.com',
+    status: 'pending',
+    expiresAt: new Date(Date.now() + 60_000),
+  };
+  const prisma = {
+    user: { findUnique: async () => ({ id: 'attacker-user', email: 'attacker@example.com' }) },
+    tenantInvitation: {
+      findUnique: async () => invitation,
+      updateMany: async () => { updateAttempted = true; return { count: 1 }; },
+    },
+  };
+  const service = new TenantService(prisma);
+
+  await assert.rejects(
+    () => service.rejectMyInvitation('attacker-user', invitation.id),
+    (error) => error instanceof ForbiddenException
+      && error.message === 'این دعوت‌نامه برای حساب کاربری شما صادر نشده است',
+  );
+  assert.equal(updateAttempted, false);
+});
+
+test('a previously claimed organization invitation cannot create another membership', async () => {
+  const invitation = {
+    id: 'invitation-a',
+    tenantId: 'tenant-a',
+    invitedUserId: 'target-user',
+    email: 'target@example.com',
+    role: 'member',
+    status: 'pending',
+    accepted: false,
+    revokedAt: null,
+    expiresAt: new Date(Date.now() + 60_000),
+    metadata: {},
+    tenant: { id: 'tenant-a', name: 'Tenant A' },
+  };
+  const tx = {
+    tenantMember: {
+      findUnique: async () => null,
+      create: () => assert.fail('membership must not be created after the invitation claim fails'),
+    },
+    tenantInvitation: { updateMany: async () => ({ count: 0 }) },
+  };
+  const prisma = {
+    tenantInvitation: { findUnique: async () => invitation },
+    user: { findUnique: async () => ({ id: 'target-user', email: invitation.email }) },
+    $transaction: async (callback) => callback(tx),
+  };
+  const service = new TenantService(prisma);
+
+  await assert.rejects(
+    () => service.acceptMyInvitation('target-user', invitation.id),
+    /این دعوت‌نامه دیگر قابل پذیرش نیست/,
   );
 });
 
@@ -198,9 +294,48 @@ test('saving a new integration host removes an omitted stored secret', async () 
 test('the built-in manager role excludes platform-administration permissions', () => {
   const permissions = getDefaultPermissionsForTenantRole('manager');
 
-  assert.equal(permissions.includes('roles.manage'), false);
+  assert.equal(APP_PERMISSIONS.some((permission) => permission.key === 'roles.manage'), false);
   assert.equal(permissions.includes('modules.manage'), false);
   assert.equal(permissions.includes('platform.admin'), false);
+});
+
+test('only a super admin can transfer organization ownership', async () => {
+  const prisma = { $transaction: () => assert.fail('non-super-admin transfer must not reach the database') };
+  const service = new PlatformAdminService(prisma);
+
+  await assert.rejects(
+    () => service.transferOwnership(
+      { id: 'platform-admin', role: 'platform_admin' },
+      'tenant-a',
+      'target-user',
+    ),
+    (error) => error instanceof ForbiddenException
+      && error.message === 'فقط مدیر کل سیستم می‌تواند مالکیت سازمان را منتقل کند',
+  );
+});
+
+test('permanent platform deletion requires all three confirmations', async () => {
+  const prisma = {
+    user: {
+      findUnique: async () => ({
+        id: 'target-user',
+        email: 'target@example.com',
+        role: 'user',
+        primaryOwnedTenants: [],
+      }),
+    },
+    $transaction: () => assert.fail('deletion must not reach the database without all confirmations'),
+  };
+  const service = new PlatformAdminService(prisma);
+
+  await assert.rejects(
+    () => service.deleteUser(
+      { id: 'super-admin', role: 'super_admin' },
+      'target-user',
+      { confirmIrreversible: true, confirmCascade: false, confirmationText: 'target@example.com' },
+    ),
+    /هر سه مرحله تأیید حذف باید تکمیل شوند/,
+  );
 });
 
 test('refresh tokens are stored as SHA-256 hashes', async () => {

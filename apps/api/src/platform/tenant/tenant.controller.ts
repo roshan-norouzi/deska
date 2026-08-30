@@ -6,9 +6,11 @@ import {
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
   ForbiddenException,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { PLATFORM_ROLES } from '@deska/shared';
 import { User, TenantCtx } from '../../common/decorators/params.decorator';
 import type { AuthUser, TenantContext } from '../../common/decorators/params.decorator';
@@ -19,7 +21,6 @@ import { CreateTenantDto } from './dto/create-tenant.dto';
 import { InviteMemberDto } from './dto/invite-member.dto';
 import { UpdateMemberDto } from './dto/update-member.dto';
 import { UpdateTenantDto } from './dto/update-tenant.dto';
-import { TransferOwnershipDto } from './dto/transfer-ownership.dto';
 import { TenantService } from './tenant.service';
 
 @Controller('tenants')
@@ -36,6 +37,27 @@ export class TenantController {
   @Post()
   create(@User() user: AuthUser, @Body() dto: CreateTenantDto) {
     return this.tenantService.create(user.id, dto);
+  }
+
+  @Get('my-invitations')
+  myInvitations(@User() user: AuthUser) {
+    return this.tenantService.listMyInvitations(user.id);
+  }
+
+  @Post('my-invitations/:invitationId/accept')
+  acceptMyInvitation(
+    @User() user: AuthUser,
+    @Param('invitationId') invitationId: string,
+  ) {
+    return this.tenantService.acceptMyInvitation(user.id, invitationId);
+  }
+
+  @Post('my-invitations/:invitationId/reject')
+  rejectMyInvitation(
+    @User() user: AuthUser,
+    @Param('invitationId') invitationId: string,
+  ) {
+    return this.tenantService.rejectMyInvitation(user.id, invitationId);
   }
 
   @Get('current')
@@ -72,6 +94,18 @@ export class TenantController {
   ) {
     this.assertTenantMatch(id, tenant.tenantId);
     return this.tenantService.inviteMember(tenant.tenantId, dto, tenant.memberRole, user.id);
+  }
+
+  @Get(':id/users/search')
+  @UseGuards(TenantGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  searchPlatformUsers(
+    @Param('id') id: string,
+    @Query('q') query: string,
+    @TenantCtx() tenant: TenantContext,
+  ) {
+    this.assertTenantMatch(id, tenant.tenantId);
+    return this.tenantService.searchPlatformUsers(tenant.tenantId, query ?? '', tenant.memberRole);
   }
 
   @Post('invites/accept')
@@ -150,23 +184,6 @@ export class TenantController {
   ) {
     this.assertTenantMatch(id, tenant.tenantId);
     return this.tenantService.revokeInvitation(tenant.tenantId, invitationId, tenant.memberRole);
-  }
-
-  @Post(':id/transfer-ownership')
-  @UseGuards(TenantGuard)
-  transferOwnership(
-    @Param('id') id: string,
-    @Body() dto: TransferOwnershipDto,
-    @User() user: AuthUser,
-    @TenantCtx() tenant: TenantContext,
-  ) {
-    this.assertTenantMatch(id, tenant.tenantId);
-    return this.tenantService.transferOwnership(
-      tenant.tenantId,
-      dto.targetUserId,
-      user.id,
-      tenant.memberRole,
-    );
   }
 
   private assertTenantMatch(routeTenantId: string, activeTenantId: string) {

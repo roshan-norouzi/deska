@@ -23,6 +23,7 @@ import { RefreshDto } from './dto/refresh.dto';
 import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 const ACCESS_COOKIE_NAME = 'deska_access_token';
 const REFRESH_COOKIE_NAME = 'deska_refresh_token';
@@ -125,6 +126,18 @@ export class AuthController {
   ) {
     const result = await this.authService.changePassword(user.id, dto);
     this.clearAuthCookies(response);
+    return result;
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('profile')
+  async updateProfile(
+    @User() user: AuthUser,
+    @Body() dto: UpdateProfileDto,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const result = await this.authService.updateProfile(user.id, dto);
+    if (result.requiresReauthentication) this.clearAuthCookies(response);
     return result;
   }
 

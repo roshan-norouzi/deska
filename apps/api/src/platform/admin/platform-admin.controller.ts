@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import type { AuthUser } from '../../common/decorators/params.decorator';
 import { User } from '../../common/decorators/params.decorator';
 import { PlatformAdminService } from './platform-admin.service';
@@ -6,6 +6,7 @@ import { UpdatePlatformUserStatusDto } from './dto/update-platform-user-status.d
 import { UpdatePlatformUserRoleDto } from './dto/update-platform-user-role.dto';
 import { UpdateOrganizationStatusDto } from './dto/update-organization-status.dto';
 import { PlatformTransferOwnershipDto } from './dto/platform-transfer-ownership.dto';
+import { DeletePlatformEntityDto } from './dto/delete-platform-entity.dto';
 
 @Controller('platform')
 export class PlatformAdminController {
@@ -51,6 +52,15 @@ export class PlatformAdminController {
     return this.service.updateUserRole(actor, id, dto.role);
   }
 
+  @Delete('users/:id')
+  deleteUser(
+    @User() actor: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: DeletePlatformEntityDto,
+  ) {
+    return this.service.deleteUser(actor, id, dto);
+  }
+
   @Get('organizations')
   organizations(
     @User() actor: AuthUser,
@@ -74,6 +84,15 @@ export class PlatformAdminController {
     @Body() dto: UpdateOrganizationStatusDto,
   ) {
     return this.service.updateOrganizationStatus(actor, id, dto.status);
+  }
+
+  @Delete('organizations/:id')
+  deleteOrganization(
+    @User() actor: AuthUser,
+    @Param('id') id: string,
+    @Body() dto: DeletePlatformEntityDto,
+  ) {
+    return this.service.deleteOrganization(actor, id, dto);
   }
 
   @Post('organizations/:id/transfer-ownership')
