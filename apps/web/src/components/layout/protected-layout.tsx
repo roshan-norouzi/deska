@@ -12,6 +12,7 @@ interface ProtectedLayoutProps {
   title?: string;
   superAdminOnly?: boolean;
   platformAdminOnly?: boolean;
+  ownerOnly?: boolean;
   tenantRequired?: boolean;
 }
 
@@ -20,11 +21,12 @@ export function ProtectedLayout({
   title,
   superAdminOnly = false,
   platformAdminOnly = false,
+  ownerOnly = false,
   tenantRequired = true,
 }: ProtectedLayoutProps) {
   const router = useRouter();
   const { isAuthenticated, isLoading: authLoading, isSuperAdmin, isPlatformAdmin } = useAuth();
-  const { activeTenantId, isLoading: tenantLoading } = useTenant();
+  const { activeTenantId, activeTenant, isLoading: tenantLoading } = useTenant();
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
@@ -35,7 +37,7 @@ export function ProtectedLayout({
       return;
     }
 
-    if ((superAdminOnly && !isSuperAdmin) || (platformAdminOnly && !isPlatformAdmin)) {
+    if ((superAdminOnly && !isSuperAdmin) || (platformAdminOnly && !isPlatformAdmin) || (ownerOnly && !isSuperAdmin && activeTenant?.memberRole !== 'owner')) {
       router.replace(activeTenantId ? '/dashboard' : '/organizations');
       return;
     }
@@ -46,7 +48,7 @@ export function ProtectedLayout({
     }
 
     setReady(true);
-  }, [authLoading, tenantLoading, isAuthenticated, isSuperAdmin, isPlatformAdmin, activeTenantId, superAdminOnly, platformAdminOnly, tenantRequired, router]);
+  }, [authLoading, tenantLoading, isAuthenticated, isSuperAdmin, isPlatformAdmin, activeTenantId, activeTenant?.memberRole, superAdminOnly, platformAdminOnly, ownerOnly, tenantRequired, router]);
 
   if (authLoading || tenantLoading || !ready) {
     return (

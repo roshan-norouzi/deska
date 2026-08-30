@@ -12,7 +12,7 @@ import { apiFetch } from '@/lib/utils'
 export interface EmployeeProfileData {
   id: string
   tenantId: string
-  employeeCode: string
+  employeeCode?: string | null
   jobTitle?: string | null
   firstName?: string | null
   lastName?: string | null
@@ -65,7 +65,7 @@ export function EmployeeProfileSettings({ tenant, employee }: Props) {
     setSaving(true); setMessage(null)
     try {
       const profile = pickProvidedProfileFields(form as EmployeeProfileInput)
-      await apiFetch(`/auth/employee-profiles/${tenant.id}`, { method: 'PATCH', skipTenant: true, body: profile })
+      await apiFetch('/auth/employee-profile', { method: 'PATCH', skipTenant: true, body: profile })
       setMessage('اطلاعات پرسنلی ذخیره شد')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'خطا در ذخیره اطلاعات پرسنلی')

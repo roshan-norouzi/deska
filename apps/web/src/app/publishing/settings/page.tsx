@@ -263,7 +263,7 @@ export default function PublishingSettingsPage() {
   }
 
   return (
-    <ProtectedLayout title="تنظیمات نشر هوشمند">
+    <ProtectedLayout title="تنظیمات نشر هوشمند" ownerOnly>
       <main className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6" dir="rtl">
         <header className="flex flex-col gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-blue-950 p-6 text-white shadow-xl shadow-slate-900/10 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-start gap-4"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Settings2 className="h-6 w-6" /></span><div><h1 className="text-2xl font-bold">تنظیمات نشر هوشمند</h1><p className="mt-2 text-sm leading-6 text-slate-300">اتصال امن GapGPT، پایش خبرها و انتشار مستقیم در WordPress.</p></div></div>

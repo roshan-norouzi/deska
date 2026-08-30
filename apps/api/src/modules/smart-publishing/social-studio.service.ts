@@ -113,9 +113,6 @@ export class SocialStudioService {
       }
     }
     const queued = await this.prisma.socialArticle.count({ where: { tenantId, status: 'pending' } });
-    void this.processPending(tenantId, 3).catch((error) => {
-      this.logger.warn(`Social preparation queue failed: ${error instanceof Error ? error.message : 'unknown error'}`);
-    });
     const failed = results.filter((item) => !item.ok);
     return { ok: failed.length === 0, feeds: results, queued };
   }
@@ -262,7 +259,8 @@ export class SocialStudioService {
         }
         tenantIds.add(feed.tenantId);
       }
-      for (const tenantId of tenantIds) await this.processPending(tenantId, 3);
+      // Feed polling only discovers articles. AI preparation is explicitly
+      // started by the user from the article's Prepare button.
     } catch (error) {
       this.logger.error(`Social studio maintenance failed: ${error instanceof Error ? error.message : 'unknown error'}`);
     } finally {
@@ -270,13 +268,4 @@ export class SocialStudioService {
     }
   }
 
-  private async processPending(tenantId: string, limit: number) {
-    const rows = await this.prisma.socialArticle.findMany({ where: { tenantId, status: 'pending' }, orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }], take: limit, select: { id: true } });
-    let prepared = 0;
-    for (const row of rows) {
-      try { await this.prepare(tenantId, row.id); prepared++; }
-      catch (error) { this.logger.warn(`Social article ${row.id} failed: ${error instanceof Error ? error.message : 'unknown error'}`); }
-    }
-    return prepared;
-  }
 }

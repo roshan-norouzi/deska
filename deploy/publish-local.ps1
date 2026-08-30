@@ -21,6 +21,14 @@ if (Test-Path $configPath) {
 }
 
 if (-not $SkipSystemExport -and (Get-Command docker -ErrorAction SilentlyContinue)) {
+  if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+    throw 'pnpm is required to prepare the local Prisma Client before exporting system observances.'
+  }
+  Write-Host 'Preparing Prisma Client for the local PostgreSQL database...' -ForegroundColor Cyan
+  & pnpm --filter @deska/api exec prisma generate
+  if ($LASTEXITCODE -ne 0) {
+    throw 'Unable to generate the local Prisma Client. Close processes locking Prisma files and retry.'
+  }
   Write-Host 'Exporting local system observances...' -ForegroundColor Cyan
   $prismaPath = Join-Path $projectRoot 'apps/api/prisma'
   try {

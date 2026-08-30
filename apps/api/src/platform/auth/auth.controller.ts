@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -154,13 +155,12 @@ export class AuthController {
   }
 
   @UseGuards(JwtAuthGuard)
-  @Patch('employee-profiles/:tenantId')
+  @Patch('employee-profile')
   updateEmployeeProfile(
     @User() user: AuthUser,
-    @Param('tenantId') tenantId: string,
     @Body() dto: UpdateEmployeeProfileDto,
   ) {
-    return this.authService.updateOwnEmployeeProfile(user.id, tenantId, dto);
+    return this.authService.updateOwnEmployeeProfile(user.id, dto);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -183,6 +183,40 @@ export class AuthController {
     response.setHeader('Cache-Control', 'private, max-age=3600');
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.sendFile(avatar.path);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('user-documents')
+  listUserDocuments(@User() user: AuthUser) {
+    return this.authService.listUserDocuments(user.id);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('user-documents/national-card')
+  @UseInterceptors(FileInterceptor('file', { storage: memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } }))
+  uploadNationalCard(@User() user: AuthUser, @UploadedFile() file: Express.Multer.File) {
+    return this.authService.uploadNationalCard(user.id, file);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Get('user-documents/:documentId/file')
+  async getUserDocument(
+    @User() user: AuthUser,
+    @Param('documentId') documentId: string,
+    @Res() response: Response,
+  ) {
+    const document = await this.authService.getUserDocument(user.id, documentId);
+    response.setHeader('Content-Type', document.contentType);
+    response.setHeader('Content-Disposition', 'inline');
+    response.setHeader('Cache-Control', 'private, no-store');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
+    response.sendFile(document.path);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Delete('user-documents/:documentId')
+  removeUserDocument(@User() user: AuthUser, @Param('documentId') documentId: string) {
+    return this.authService.removeUserDocument(user.id, documentId);
   }
 
   @UseGuards(JwtAuthGuard)

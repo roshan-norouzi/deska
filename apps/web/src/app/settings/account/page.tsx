@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Building2, KeyRound, ShieldCheck, User } from 'lucide-react';
+import { Building2, ExternalLink, FileText, KeyRound, ShieldCheck, Trash2, User } from 'lucide-react';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -17,9 +17,19 @@ interface ProfileUpdateResult {
   requiresReauthentication: boolean;
 }
 
-interface EmployeeProfileResponse {
-  tenant: { id: string; name: string };
-  employee: EmployeeProfileData;
+interface EmployeeProfilesResponse {
+  profile: EmployeeProfileData;
+  organizations: Array<{ id: string; name: string; slug: string }>;
+}
+
+interface UserDocument {
+  id: string;
+  kind: string;
+  originalName: string;
+  mimeType: string;
+  size: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export default function SettingsAccountPage() {
@@ -37,10 +47,15 @@ export default function SettingsAccountPage() {
   const [savingPassword, setSavingPassword] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [employeeProfiles, setEmployeeProfiles] = useState<EmployeeProfileResponse[]>([]);
+  const [employeeProfiles, setEmployeeProfiles] = useState<EmployeeProfilesResponse | null>(null);
   const [profilesLoading, setProfilesLoading] = useState(false);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [userDocuments, setUserDocuments] = useState<UserDocument[]>([]);
+  const [documentsLoading, setDocumentsLoading] = useState(false);
+  const [documentUploading, setDocumentUploading] = useState(false);
+  const [documentError, setDocumentError] = useState<string | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
+  const nationalCardInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -49,10 +64,15 @@ export default function SettingsAccountPage() {
     setPhone(user.phone ?? '');
     setAvatarUrl(user.avatarUrl ?? '');
     setProfilesLoading(true);
-    void apiFetch<EmployeeProfileResponse[]>('/auth/employee-profiles', { skipTenant: true })
-      .then((profiles) => setEmployeeProfiles(Array.isArray(profiles) ? profiles : []))
-      .catch(() => setEmployeeProfiles([]))
+    void apiFetch<EmployeeProfilesResponse>('/auth/employee-profiles', { skipTenant: true })
+      .then((profiles) => setEmployeeProfiles(profiles ?? null))
+      .catch(() => setEmployeeProfiles(null))
       .finally(() => setProfilesLoading(false));
+    setDocumentsLoading(true);
+    void apiFetch<{ documents: UserDocument[] }>('/auth/user-documents', { skipTenant: true })
+      .then((result) => setUserDocuments(result.documents ?? []))
+      .catch(() => setUserDocuments([]))
+      .finally(() => setDocumentsLoading(false));
   }, [user]);
 
   async function handleAvatarUpload(event: React.ChangeEvent<HTMLInputElement>) {
@@ -70,6 +90,47 @@ export default function SettingsAccountPage() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'خطا در بارگذاری تصویر پروفایل');
     } finally { setAvatarUploading(false); }
+  }
+
+  async function handleNationalCardUpload(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setDocumentError(null);
+    setDocumentUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      await apiFetch<UserDocument>('/auth/user-documents/national-card', {
+        method: 'POST',
+        skipTenant: true,
+        body: formData,
+      });
+      const result = await apiFetch<{ documents: UserDocument[] }>('/auth/user-documents', { skipTenant: true });
+      setUserDocuments(result.documents ?? []);
+      setMessage('تصویر کارت ملی در اسناد کاربر ذخیره شد');
+    } catch (reason) {
+      setDocumentError(reason instanceof Error ? reason.message : 'خطا در بارگذاری تصویر کارت ملی');
+    } finally {
+      setDocumentUploading(false);
+    }
+  }
+
+  async function handleUserDocumentDelete(documentId: string) {
+    if (!window.confirm('آیا از حذف تصویر کارت ملی اطمینان دارید؟')) return;
+    setDocumentError(null);
+    try {
+      await apiFetch(`/auth/user-documents/${documentId}`, { method: 'DELETE', skipTenant: true });
+      setUserDocuments((documents) => documents.filter((document) => document.id !== documentId));
+      setMessage('سند کاربر حذف شد');
+    } catch (reason) {
+      setDocumentError(reason instanceof Error ? reason.message : 'خطا در حذف سند کاربر');
+    }
+  }
+
+  function formatFileSize(bytes: number) {
+    if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} کیلوبایت`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} مگابایت`;
   }
 
   const avatarPreview = avatarUrl
@@ -181,9 +242,30 @@ export default function SettingsAccountPage() {
         </Card>
 
         <Card className="overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 bg-slate-50/70"><div><CardTitle className="flex items-center gap-2 text-base"><Building2 className="h-4 w-4" />سازمان‌های من</CardTitle><p className="mt-1 text-xs text-slate-500">اطلاعات پرسنلی هر سازمان را جداگانه تکمیل کنید.</p></div><Link href="/organizations"><Button type="button" variant="outline" size="sm">افزودن سازمان جدید</Button></Link></CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 bg-slate-50/70"><div><CardTitle className="flex items-center gap-2 text-base"><Building2 className="h-4 w-4" />سازمان‌های من</CardTitle><p className="mt-1 text-xs text-slate-500">اطلاعات پرسنلی شما بین سازمان‌های عضو مشترک است.</p></div><Link href="/organizations"><Button type="button" variant="outline" size="sm">افزودن سازمان جدید</Button></Link></CardHeader>
           <CardContent className="space-y-5">
-            {profilesLoading ? <div className="py-6 text-center text-sm text-slate-500">در حال دریافت پروفایل‌های پرسنلی...</div> : employeeProfiles.length === 0 ? <p className="text-sm text-slate-500">هنوز در سازمانی عضو نیستید.</p> : employeeProfiles.map((profile) => <EmployeeProfileSettings key={profile.employee.id} tenant={profile.tenant} employee={profile.employee} />)}
+            {profilesLoading ? <div className="py-6 text-center text-sm text-slate-500">در حال دریافت پروفایل پرسنلی...</div> : !employeeProfiles ? <p className="text-sm text-slate-500">پروفایل پرسنلی هنوز ایجاد نشده است.</p> : <EmployeeProfileSettings tenant={{ id: 'global', name: 'همه سازمان‌های شما' }} employee={employeeProfiles.profile} />}
+            {employeeProfiles?.organizations.length ? <p className="text-xs text-slate-500">این اطلاعات در سازمان‌های زیر مشترک است: {employeeProfiles.organizations.map((organization) => organization.name).join('، ')}</p> : null}
+          </CardContent>
+        </Card>
+
+        <Card className="overflow-hidden">
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70"><CardTitle className="flex items-center gap-2 text-base"><FileText className="h-4 w-4" />اسناد کاربر</CardTitle><p className="mt-1 text-xs text-slate-500">تصویر کارت ملی به حساب کاربری شما تعلق دارد و مستقل از سازمان‌ها نگهداری می‌شود.</p></CardHeader>
+          <CardContent className="space-y-4">
+            {documentsLoading ? <div className="py-4 text-center text-sm text-slate-500">در حال دریافت اسناد...</div> : userDocuments.length === 0 ? <p className="text-sm text-slate-500">هنوز سندی برای حساب شما ثبت نشده است.</p> : userDocuments.map((document) => (
+              <div key={document.id} className="flex flex-wrap items-center gap-3 rounded-2xl border border-slate-200 p-4">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600"><FileText className="h-5 w-5" /></span>
+                <div className="min-w-0 flex-1"><p className="truncate text-sm font-medium text-slate-800">{document.kind === 'national_card' ? 'تصویر کارت ملی' : document.originalName}</p><p className="mt-1 text-xs text-slate-500">{document.originalName} · {formatFileSize(document.size)}</p></div>
+                <a className="inline-flex items-center gap-1 rounded-xl border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50" href={withBasePath(`/api/auth/user-documents/${document.id}/file`)} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" />مشاهده</a>
+                <Button type="button" variant="danger" size="sm" onClick={() => void handleUserDocumentDelete(document.id)}><Trash2 className="h-4 w-4" />حذف</Button>
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center gap-3">
+              <input ref={nationalCardInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleNationalCardUpload} />
+              <Button type="button" variant="outline" isLoading={documentUploading} onClick={() => nationalCardInputRef.current?.click()}>بارگذاری تصویر کارت ملی</Button>
+              <span className="text-xs text-slate-500">JPG، PNG یا WebP؛ حداکثر ۵ مگابایت</span>
+            </div>
+            {documentError && <p className="text-sm text-red-600">{documentError}</p>}
           </CardContent>
         </Card>
 

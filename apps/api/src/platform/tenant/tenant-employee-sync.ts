@@ -66,6 +66,15 @@ export async function ensureEmployeeForUser(
   }
 
   const employeeCode = await nextEmployeeCode(prisma, tenantId);
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      firstName: true, lastName: true, nationalId: true, fatherName: true, motherName: true,
+      birthCertificateNumber: true, birthCertificateDate: true, birthDate: true, maritalStatus: true,
+      address: true, postalCode: true, mobilePhone: true, landlinePhone: true, bankAccountNumber: true,
+      bankCardNumber: true, iban: true, bankName: true, insuranceNumber: true,
+    },
+  });
 
   return prisma.employee.create({
     data: {
@@ -74,6 +83,24 @@ export async function ensureEmployeeForUser(
       employeeCode,
       hireDate: joinedAt ?? new Date(),
       status: 'active',
+      firstName: user?.firstName ?? null,
+      lastName: user?.lastName ?? null,
+      nationalId: user?.nationalId ?? null,
+      fatherName: user?.fatherName ?? null,
+      motherName: user?.motherName ?? null,
+      birthCertificateNumber: user?.birthCertificateNumber ?? null,
+      birthCertificateDate: user?.birthCertificateDate ?? null,
+      birthDate: user?.birthDate ?? null,
+      maritalStatus: user?.maritalStatus ?? null,
+      address: user?.address ?? null,
+      postalCode: user?.postalCode ?? null,
+      mobilePhone: user?.mobilePhone ?? null,
+      landlinePhone: user?.landlinePhone ?? null,
+      bankAccountNumber: user?.bankAccountNumber ?? null,
+      bankCardNumber: user?.bankCardNumber ?? null,
+      iban: user?.iban ?? null,
+      bankName: user?.bankName ?? null,
+      insuranceNumber: user?.insuranceNumber ?? null,
     },
     include: { department: true },
   });

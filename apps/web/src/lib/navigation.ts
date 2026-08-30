@@ -1,7 +1,7 @@
 import { LayoutDashboard, Users, FileText, Calendar, UserCheck, User, Building2, Settings, Puzzle, FolderKanban, Send, Rss, type LucideIcon } from 'lucide-react';
 import { MODULE_DOMAINS } from '@deska/shared';
 
-export interface NavItem { href: string; label: string; icon: LucideIcon; moduleId?: string; superAdminOnly?: boolean; }
+export interface NavItem { href: string; label: string; icon: LucideIcon; moduleId?: string; superAdminOnly?: boolean; ownerOnly?: boolean; }
 export interface NavGroup { id: string; label: string; domain?: string; items: NavItem[]; }
 
 export const NAV_GROUPS: NavGroup[] = [
@@ -21,20 +21,21 @@ export const NAV_GROUPS: NavGroup[] = [
     { href: '/publishing/news', label: 'اتاق خبر', icon: Send, moduleId: 'smart-publishing' },
     { href: '/publishing/social', label: 'استودیوی اجتماعی', icon: Send, moduleId: 'smart-publishing' },
     { href: '/publishing/daily-report', label: 'دیلی‌ریپورت', icon: Send, moduleId: 'smart-publishing' },
-    { href: '/publishing/settings', label: 'تنظیمات نشر هوشمند', icon: Send, moduleId: 'smart-publishing' },
+    { href: '/publishing/settings', label: 'تنظیمات نشر هوشمند', icon: Send, moduleId: 'smart-publishing', ownerOnly: true },
   ] },
   { id: 'settings', label: 'تنظیمات', domain: MODULE_DOMAINS.PLATFORM, items: [
-    { href: '/settings', label: 'تنظیمات سازمان', icon: Settings },
+    { href: '/settings', label: 'تنظیمات سازمان', icon: Settings, ownerOnly: true },
     { href: '/settings/account', label: 'حساب کاربری', icon: User },
-    { href: '/settings/modules', label: 'ماژول‌ها', icon: Puzzle },
+    { href: '/settings/modules', label: 'ماژول‌ها', icon: Puzzle, ownerOnly: true },
     { href: '/settings/observances', label: 'مناسبت‌های تقویم', icon: Calendar, superAdminOnly: true },
     { href: '/platform', label: 'مدیریت پلتفرم', icon: Building2, superAdminOnly: true },
   ] },
 ];
 
-export function filterNavGroups(enabledModules: string[] | null, isSuperAdmin: boolean): NavGroup[] {
+export function filterNavGroups(enabledModules: string[] | null, isSuperAdmin: boolean, isOwner: boolean): NavGroup[] {
   return NAV_GROUPS.map((group) => ({ ...group, items: group.items.filter((item) => {
     if (item.superAdminOnly && !isSuperAdmin) return false;
+    if (item.ownerOnly && !isSuperAdmin && !isOwner) return false;
     if (!item.moduleId || !enabledModules) return true;
     return enabledModules.includes(item.moduleId);
   }) })).filter((group) => group.items.length > 0);

@@ -98,7 +98,7 @@ export class SocialNetworkPublisherService {
     // A prepared article keeps the caption generated with the old template.
     // If the user submits that unchanged caption, rebuild it from the current
     // template. A changed caption is treated as an intentional manual edit.
-    const normalizedCaption = submittedCaption === article.captionText?.trim()
+    const normalizedCaption = !submittedCaption || submittedCaption === article.captionText?.trim()
       ? renderCaptionTemplate(String(settings.social_caption_template || '{title}\n\n{lead}\n\n{summary}\n\n{link}'), {
         title: article.title,
         lead: article.leadText || '',

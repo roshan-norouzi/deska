@@ -21,8 +21,6 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { normalizeDigits, normalizeEmployeeProfile, pickProvidedProfileFields, type EmployeeProfileInput } from '@deska/shared';
 import { Prisma } from '@prisma/client';
 import { UpdateEmployeeProfileDto } from './dto/update-employee-profile.dto';
-import { ensureEmployeeForUser } from '../tenant/tenant-employee-sync';
-import { serializeEmployeeForApi } from '../tenant/employee-profile-backfill';
 import {
   applyEmployeeProfileToUpdate,
   assertUniqueNationalId,
@@ -418,69 +416,61 @@ export class AuthService {
   }
 
   async employeeProfiles(userId: string) {
-    const employees = await this.prisma.employee.findMany({
-      where: {
-        userId,
-        tenant: {
-          isActive: true,
-          status: 'active',
-          members: { some: { userId, status: 'active' } },
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        firstName: true, lastName: true, nationalId: true, fatherName: true, motherName: true,
+        birthCertificateNumber: true, birthCertificateDate: true, birthDate: true, maritalStatus: true,
+        address: true, postalCode: true, mobilePhone: true, landlinePhone: true, bankAccountNumber: true,
+        bankCardNumber: true, iban: true, bankName: true, insuranceNumber: true,
+        tenantMembers: {
+          where: { status: 'active', tenant: { isActive: true, status: 'active' } },
+          select: { tenant: { select: { id: true, name: true, slug: true } } },
+          orderBy: { joinedAt: 'asc' },
         },
       },
-      include: {
-        department: true,
-        tenant: { select: { id: true, name: true, slug: true } },
-      },
-      orderBy: { createdAt: 'asc' },
     });
-
-    return employees.map((employee) => ({
-      tenant: employee.tenant,
-      employee: serializeEmployeeForApi(employee),
-    }));
+    if (!user) throw new UnauthorizedException('کاربر یافت نشد');
+    const { tenantMembers, ...profile } = user;
+    return {
+      profile: {
+        ...profile,
+        birthCertificateDate: profile.birthCertificateDate?.toISOString() ?? null,
+        birthDate: profile.birthDate?.toISOString() ?? null,
+      },
+      organizations: tenantMembers.map((member) => member.tenant),
+    };
   }
 
-  async updateOwnEmployeeProfile(
-    userId: string,
-    tenantId: string,
-    dto: UpdateEmployeeProfileDto,
-  ) {
-    const membership = await this.prisma.tenantMember.findUnique({
-      where: { tenantId_userId: { tenantId, userId } },
-      select: { status: true, joinedAt: true },
+  async updateOwnEmployeeProfile(userId: string, dto: UpdateEmployeeProfileDto) {
+    const current = await this.prisma.user.findFirst({
+      where: { id: userId, isActive: true, status: 'active' },
+      select: { id: true },
     });
-    if (!membership || membership.status !== 'active') {
-      throw new UnauthorizedException('شما عضو فعال این سازمان نیستید');
-    }
+    if (!current) throw new UnauthorizedException('حساب کاربری فعال نیست');
 
-    const employee = await ensureEmployeeForUser(this.prisma, tenantId, userId, membership.joinedAt);
     const provided = pickProvidedProfileFields(dto as unknown as EmployeeProfileInput);
     assertValidEmployeeProfile(provided, { requireAll: false });
     const normalized = normalizeEmployeeProfile(provided);
-    await assertUniqueNationalId(this.prisma, tenantId, normalized.nationalId, employee.id);
+    await assertUniqueNationalId(this.prisma, '', normalized.nationalId, userId);
 
-    const update: Prisma.EmployeeUpdateInput = {};
+    const update: Prisma.UserUpdateInput = {};
     applyEmployeeProfileToUpdate(provided, update);
-    const updated = Object.keys(update).length > 0
-      ? await this.prisma.employee.update({
-        where: { id: employee.id },
-        data: update,
-        include: { department: true },
-      })
-      : employee;
+    if (Object.keys(update).length > 0) {
+      await this.prisma.$transaction(async (tx) => {
+        await tx.user.update({ where: { id: userId }, data: update });
+        // Keep legacy employee columns synchronized for modules that still read them.
+        await tx.employee.updateMany({ where: { userId }, data: update as Prisma.EmployeeUpdateManyMutationInput });
+        await tx.auditLog.create({
+          data: {
+            tenantId: null, userId, action: 'account.employee_profile_updated', entityType: 'User', entityId: userId,
+            changes: { fields: Object.keys(update) },
+          },
+        });
+      });
+    }
 
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId,
-        userId,
-        action: 'account.employee_profile_updated',
-        entityType: 'Employee',
-        entityId: employee.id,
-        changes: { fields: Object.keys(update) },
-      },
-    });
-
-    return { tenantId, employee: serializeEmployeeForApi(updated) };
+    return this.employeeProfiles(userId);
   }
 
   async uploadProfileAvatar(userId: string, file?: Express.Multer.File) {
@@ -541,6 +531,182 @@ export class AuthService {
       path: filePath,
       contentType: filename.endsWith('.png') ? 'image/png' : filename.endsWith('.webp') ? 'image/webp' : 'image/jpeg',
     };
+  }
+
+  async listUserDocuments(userId: string) {
+    await this.assertActiveUser(userId);
+    const documents = await this.prisma.userDocument.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        kind: true,
+        originalName: true,
+        mimeType: true,
+        size: true,
+        createdAt: true,
+        updatedAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return { documents };
+  }
+
+  async uploadNationalCard(userId: string, file?: Express.Multer.File) {
+    if (!file?.buffer?.length) throw new BadRequestException('تصویر کارت ملی انتخاب نشده است');
+
+    const imageTypes: Record<string, { extension: string; signature: (buffer: Buffer) => boolean }> = {
+      'image/jpeg': {
+        extension: 'jpg',
+        signature: (buffer) => buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff,
+      },
+      'image/png': {
+        extension: 'png',
+        signature: (buffer) => buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])),
+      },
+      'image/webp': {
+        extension: 'webp',
+        signature: (buffer) => buffer.length >= 12 && buffer.subarray(0, 4).toString() === 'RIFF' && buffer.subarray(8, 12).toString() === 'WEBP',
+      },
+    };
+    const image = imageTypes[file.mimetype];
+    if (!image || file.size > 5 * 1024 * 1024 || !image.signature(file.buffer)) {
+      throw new BadRequestException('فرمت تصویر فقط باید JPG، PNG یا WebP و حداکثر ۵ مگابایت باشد');
+    }
+
+    await this.assertActiveUser(userId);
+    const filename = `${randomUUID()}.${image.extension}`;
+    const directory = this.userDocumentStorageDirectory(userId);
+    await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+    const targetPath = this.userDocumentPath(userId, filename);
+    await fs.writeFile(targetPath, file.buffer, { mode: 0o600 });
+
+    const originalName = path.basename(file.originalname || 'تصویر کارت ملی').trim().slice(0, 255) || 'تصویر کارت ملی';
+    let previousPath: string | null = null;
+    let document;
+    try {
+      document = await this.prisma.$transaction(async (tx) => {
+        const previous = await tx.userDocument.findUnique({
+          where: { userId_kind: { userId, kind: 'national_card' } },
+          select: { name: true },
+        });
+        previousPath = previous ? this.userDocumentPath(userId, previous.name) : null;
+
+        const saved = await tx.userDocument.upsert({
+          where: { userId_kind: { userId, kind: 'national_card' } },
+          create: {
+            userId,
+            kind: 'national_card',
+            name: filename,
+            originalName,
+            mimeType: image.extension === 'jpg' ? 'image/jpeg' : file.mimetype,
+            size: file.size,
+            path: filename,
+          },
+          update: {
+            name: filename,
+            originalName,
+            mimeType: image.extension === 'jpg' ? 'image/jpeg' : file.mimetype,
+            size: file.size,
+          },
+          select: {
+            id: true,
+            kind: true,
+            originalName: true,
+            mimeType: true,
+            size: true,
+            createdAt: true,
+            updatedAt: true,
+          },
+        });
+        await tx.auditLog.create({
+          data: {
+            tenantId: null,
+            userId,
+            action: 'account.user_document_uploaded',
+            entityType: 'UserDocument',
+            entityId: saved.id,
+            changes: { kind: 'national_card', replaced: Boolean(previous) },
+          },
+        });
+        return saved;
+      });
+
+    } catch (error) {
+      await fs.rm(targetPath, { force: true });
+      throw error;
+    }
+
+    // A cleanup failure must not remove the newly committed file or leave the
+    // database pointing to a missing document. Orphan cleanup can be retried
+    // later without affecting the user's current document.
+    if (previousPath && previousPath !== targetPath) {
+      await fs.rm(previousPath, { force: true }).catch(() => undefined);
+    }
+    return document;
+  }
+
+  async getUserDocument(userId: string, documentId: string) {
+    await this.assertActiveUser(userId);
+    const document = await this.prisma.userDocument.findFirst({
+      where: { id: documentId, userId },
+      select: { name: true, mimeType: true, originalName: true },
+    });
+    if (!document) throw new NotFoundException('سند کاربر یافت نشد');
+
+    const filePath = this.userDocumentPath(userId, document.name);
+    try {
+      await fs.access(filePath);
+    } catch {
+      throw new NotFoundException('فایل سند کاربر یافت نشد');
+    }
+    return { path: filePath, contentType: document.mimeType, originalName: document.originalName };
+  }
+
+  async removeUserDocument(userId: string, documentId: string) {
+    await this.assertActiveUser(userId);
+    const document = await this.prisma.userDocument.findFirst({
+      where: { id: documentId, userId },
+      select: { id: true, name: true, kind: true },
+    });
+    if (!document) throw new NotFoundException('سند کاربر یافت نشد');
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.userDocument.delete({ where: { id: document.id } });
+      await tx.auditLog.create({
+        data: {
+          tenantId: null,
+          userId,
+          action: 'account.user_document_deleted',
+          entityType: 'UserDocument',
+          entityId: document.id,
+          changes: { kind: document.kind },
+        },
+      });
+    });
+    await fs.rm(this.userDocumentPath(userId, document.name), { force: true });
+    return { success: true };
+  }
+
+  private async assertActiveUser(userId: string) {
+    const user = await this.prisma.user.findFirst({
+      where: { id: userId, isActive: true, status: 'active' },
+      select: { id: true },
+    });
+    if (!user) throw new UnauthorizedException('حساب کاربری فعال نیست');
+  }
+
+  private userDocumentStorageDirectory(userId: string) {
+    return path.resolve(process.env.STORAGE_PATH || path.resolve(process.cwd(), 'uploads'), 'user-documents', userId);
+  }
+
+  private userDocumentPath(userId: string, filename: string) {
+    const directory = path.resolve(this.userDocumentStorageDirectory(userId));
+    const safeFilename = path.basename(filename);
+    const resolved = path.resolve(directory, safeFilename);
+    if (path.dirname(resolved) !== directory || safeFilename !== filename) {
+      throw new NotFoundException('مسیر سند کاربر نامعتبر است');
+    }
+    return resolved;
   }
 
   private profileStorageDirectory(userId: string) {

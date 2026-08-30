@@ -31,7 +31,7 @@ export function AppShell({ children, title }: AppShellProps) {
 
   const { data: tenantModules } = useApi<TenantModuleRecord[]>('/modules/tenant');
   const enabledModules = resolveEnabledModuleIds(tenantModules);
-  const navGroups = filterNavGroups(enabledModules, isSuperAdmin);
+  const navGroups = filterNavGroups(enabledModules, isSuperAdmin, activeTenant?.memberRole === 'owner');
   const appVersion = process.env.NEXT_PUBLIC_APP_VERSION ?? '1.0.0';
 
   useEffect(() => {

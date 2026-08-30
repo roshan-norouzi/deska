@@ -28,7 +28,7 @@ interface EmployeeCodeSettings { prefix: string; suffix: string; padding: number
 function SettingsContent() {
   const { activeTenant, refreshCurrentTenant } = useTenant()
   const { data, isLoading, refetch } = useApi<TenantDetail>('/tenants/current')
-  const canManage = activeTenant?.memberRole === 'owner' || activeTenant?.memberRole === 'admin'
+  const canManage = activeTenant?.memberRole === 'owner'
   const { data: codeSettings, refetch: refetchCodeSettings } = useApi<EmployeeCodeSettings>(canManage && activeTenant ? `/tenants/${activeTenant.id}/employee-code-settings` : null)
   const [name, setName] = useState('')
   const [saving, setSaving] = useState(false)
@@ -136,7 +136,7 @@ function SettingsContent() {
 
 export default function SettingsPage() {
   return (
-    <ProtectedLayout title="تنظیمات">
+    <ProtectedLayout title="تنظیمات" ownerOnly>
       <SettingsContent />
     </ProtectedLayout>
   )

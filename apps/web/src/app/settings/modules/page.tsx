@@ -132,7 +132,7 @@ function ModulesContent() {
 
 export default function SettingsModulesPage() {
   return (
-    <ProtectedLayout title="ماژول‌ها">
+    <ProtectedLayout title="ماژول‌ها" ownerOnly>
       <ModulesContent />
     </ProtectedLayout>
   );

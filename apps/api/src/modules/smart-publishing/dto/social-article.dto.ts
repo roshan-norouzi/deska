@@ -1,4 +1,4 @@
-import { IsNotEmpty, IsString, MaxLength } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class UpdateSocialLeadDto {
   @IsString({ message: 'لید باید متن باشد' })
@@ -22,8 +22,8 @@ export class UpdateSocialCaptionDto {
 }
 
 export class PublishSocialArticleDto {
+  @IsOptional()
   @IsString({ message: 'کپشن باید متن باشد' })
-  @IsNotEmpty({ message: 'کپشن نمی‌تواند خالی باشد' })
   @MaxLength(20_000, { message: 'کپشن بیش از حد طولانی است' })
   caption!: string;
 

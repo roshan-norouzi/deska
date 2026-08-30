@@ -167,7 +167,7 @@ export class TenantService {
   }
 
   async update(tenantId: string, dto: UpdateTenantDto, memberRole: string) {
-    this.assertAdmin(memberRole);
+    this.assertOwner(memberRole);
 
     const tenant = await this.prisma.tenant.findUnique({ where: { id: tenantId } });
     if (!tenant) {
@@ -188,7 +188,7 @@ export class TenantService {
   }
 
   async getEmployeeCodeSettings(tenantId: string, memberRole: string) {
-    this.assertAdmin(memberRole);
+    this.assertOwner(memberRole);
     const sequence = await this.prisma.numberSequence.upsert({
       where: { tenantId_code: { tenantId, code: 'employee' } },
       create: { tenantId, code: 'employee', prefix: 'EMP-', suffix: '', nextNumber: 1, padding: 4 },
@@ -203,7 +203,7 @@ export class TenantService {
     dto: UpdateEmployeeCodeSettingsDto,
     memberRole: string,
   ) {
-    this.assertAdmin(memberRole);
+    this.assertOwner(memberRole);
     const current = await this.getEmployeeCodeSettings(tenantId, memberRole);
     return this.prisma.numberSequence.update({
       where: { tenantId_code: { tenantId, code: 'employee' } },
@@ -792,6 +792,12 @@ export class TenantService {
     const allowed = [TENANT_ROLES.OWNER, TENANT_ROLES.ADMIN];
     if (!allowed.includes(memberRole as typeof TENANT_ROLES.OWNER)) {
       throw new ForbiddenException('فقط مالک یا مدیر ارشد می‌تواند این عملیات را انجام دهد');
+    }
+  }
+
+  private assertOwner(memberRole: string) {
+    if (memberRole !== TENANT_ROLES.OWNER) {
+      throw new ForbiddenException('تنظیمات سازمان فقط در اختیار مالک سازمان است');
     }
   }
 

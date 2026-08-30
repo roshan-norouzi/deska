@@ -23,7 +23,7 @@ export function assertValidEmployeeProfile(
 
 export function applyEmployeeProfileToUpdate(
   dto: EmployeeProfileDtoShape,
-  target: Prisma.EmployeeUpdateInput,
+  target: Prisma.UserUpdateInput,
 ) {
   const provided = pickProvidedProfileFields(dto);
   const profile = normalizeEmployeeProfile(provided);
@@ -66,15 +66,14 @@ export async function assertUniqueNationalId(
   prisma: PrismaService,
   tenantId: string,
   nationalId: string | undefined | null,
-  excludeEmployeeId?: string,
+  excludeUserId?: string,
 ) {
   if (!nationalId) return;
 
-  const duplicate = await prisma.employee.findFirst({
+  const duplicate = await prisma.user.findFirst({
     where: {
-      tenantId,
       nationalId,
-      ...(excludeEmployeeId ? { NOT: { id: excludeEmployeeId } } : {}),
+      ...(excludeUserId ? { NOT: { id: excludeUserId } } : {}),
     },
   });
 
