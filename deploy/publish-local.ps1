@@ -82,6 +82,13 @@ if ($AutoDispatch) {
     $token = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($tokenPtr)
     $uri = "https://api.github.com/repos/$owner/$repository/actions/workflows/deploy.yml/dispatches"
     $headers = @{ Authorization = "Bearer $token"; Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
+    try {
+      $viewer = Invoke-RestMethod -Method Get -Uri 'https://api.github.com/user' -Headers $headers -ErrorAction Stop
+      $repositoryInfo = Invoke-RestMethod -Method Get -Uri "https://api.github.com/repos/$owner/$repository" -Headers $headers -ErrorAction Stop
+      if (-not $viewer.login -or $repositoryInfo.full_name -ne "$owner/$repository") { throw 'Token identity or repository access could not be verified.' }
+    } catch {
+      throw 'GitHub token was rejected or cannot access the repository. Create a valid PAT/fine-grained token with repository Actions write permission and try again; never paste the token into chat.'
+    }
     $dispatchStarted = (Get-Date).ToUniversalTime()
     Invoke-RestMethod -Method Post -Uri $uri -Headers $headers -ContentType 'application/json' -Body (@{ ref = $branch } | ConvertTo-Json) | Out-Null
     Write-Host 'GitHub Actions deployment started. Waiting for result...' -ForegroundColor Cyan
