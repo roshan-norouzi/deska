@@ -7,6 +7,7 @@ import { UpdatePlatformUserRoleDto } from './dto/update-platform-user-role.dto';
 import { UpdateOrganizationStatusDto } from './dto/update-organization-status.dto';
 import { PlatformTransferOwnershipDto } from './dto/platform-transfer-ownership.dto';
 import { DeletePlatformEntityDto } from './dto/delete-platform-entity.dto';
+import { CreatePlatformUserDto } from './dto/create-platform-user.dto';
 
 @Controller('platform')
 export class PlatformAdminController {
@@ -27,6 +28,11 @@ export class PlatformAdminController {
     @Query('limit') limit?: string,
   ) {
     return this.service.listUsers(actor, { q, status, role, page, limit });
+  }
+
+  @Post('users')
+  createUser(@User() actor: AuthUser, @Body() dto: CreatePlatformUserDto) {
+    return this.service.createUser(actor, dto);
   }
 
   @Get('users/:id')

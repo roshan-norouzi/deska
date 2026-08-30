@@ -14,7 +14,6 @@ import * as path from 'node:path';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LoginDto } from './dto/login.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
-import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -73,31 +72,6 @@ export class AuthService {
     await this.prisma.user.update({
       where: { id: user.id },
       data: { failedLoginAttempts: 0, lockedUntil: null, lastLoginAt: now },
-    });
-
-    const tokens = await this.issueTokens(user.id, user.email, user.role);
-
-    return {
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        role: user.role,
-        avatarUrl: user.avatarUrl,
-      },
-      ...tokens,
-    };
-  }
-
-  async register(dto: RegisterDto) {
-    if (dto.password !== dto.confirmPassword) {
-      throw new BadRequestException('رمز عبور و تکرار آن یکسان نیست');
-    }
-    const user = await this.registerUser({
-      email: dto.email,
-      name: dto.name,
-      password: dto.password,
-      phone: dto.phone,
     });
 
     const tokens = await this.issueTokens(user.id, user.email, user.role);

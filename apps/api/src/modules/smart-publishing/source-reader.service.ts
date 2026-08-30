@@ -287,19 +287,20 @@ export class SourceReaderService {
       || $('article img, main img').map((_, node) => $(node).attr('src') || $(node).attr('data-src') || '').get().find(Boolean)
       || '';
     const featuredImageUrl = normalizeUrl(featuredImageCandidate, articleUrl);
-    const author = ($('meta[name="author"]').attr('content')
-      || $('[rel="author"]').first().text()
-      || $('[itemprop="author"]').first().text()).replace(/\s+/g, ' ').trim();
-    const category = ($('meta[property="article:section"]').attr('content')
-      || $('[itemprop="articleSection"]').first().text()).replace(/\s+/g, ' ').trim();
-    const shortUrl = normalizeUrl($('link[rel="shortlink"]').attr('href') || '', articleUrl);
+    const author = (metadata$('meta[name="author"]').attr('content')
+      || metadata$('[rel="author"]').first().text()
+      || metadata$('[itemprop="author"]').first().text()).replace(/\s+/g, ' ').trim();
+    const category = (metadata$('meta[property="article:section"]').attr('content')
+      || metadata$('[itemprop="articleSection"]').first().text()).replace(/\s+/g, ' ').trim();
+    const shortUrl = normalizeUrl(metadata$('link[rel="shortlink"]').attr('href') || '', articleUrl);
+    const authorMetadata$ = metadata$;
     const authorImageSelector = '[itemprop="author"] img, [rel="author"] img, .author img, .author-avatar img, .avatar img, [class*="author"] img, [class*="avatar"] img, img[alt*="author" i], img[alt*="نویسنده"]';
-    const authorSrcsetImage = $(authorImageSelector).map((_, node) => bestSrcset($(node).attr('srcset') || $(node).attr('data-srcset') || '')).get().find(Boolean);
+    const authorSrcsetImage = authorMetadata$(authorImageSelector).map((_, node) => bestSrcset(authorMetadata$(node).attr('srcset') || authorMetadata$(node).attr('data-srcset') || '')).get().find(Boolean);
     const authorImageCandidate = authorSrcsetImage
       || $('meta[property="article:author:image"]').attr('content')
       || $('meta[name="author:image"]').attr('content')
       || $('meta[property="profile:image"], meta[name="profile:image"]').attr('content')
-      || $(authorImageSelector).map((_, node) => $(node).attr('src') || $(node).attr('data-src') || '').get().find(Boolean)
+      || authorMetadata$(authorImageSelector).map((_, node) => authorMetadata$(node).attr('src') || authorMetadata$(node).attr('data-src') || '').get().find(Boolean)
       || (() => {
         let found = '';
         $('script[type="application/ld+json"]').each((_, node) => {

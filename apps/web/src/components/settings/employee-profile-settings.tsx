@@ -34,7 +34,7 @@ export interface EmployeeProfileData {
   insuranceNumber?: string | null
 }
 
-interface Props { tenant: { id: string; name: string }; employee: EmployeeProfileData }
+interface Props { tenant: { id: string; name: string }; employee: EmployeeProfileData; embedded?: boolean }
 
 function dateValue(value?: string | null) {
   if (!value) return ''
@@ -42,7 +42,7 @@ function dateValue(value?: string | null) {
   return Number.isNaN(date.getTime()) ? '' : date.toISOString().slice(0, 10)
 }
 
-export function EmployeeProfileSettings({ tenant, employee }: Props) {
+export function EmployeeProfileSettings({ tenant, employee, embedded = false }: Props) {
   const [form, setForm] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -72,8 +72,8 @@ export function EmployeeProfileSettings({ tenant, employee }: Props) {
     } finally { setSaving(false) }
   }
 
-  return (
-    <Card className="overflow-hidden">
+  const content = (
+    <>
       <div className="border-b border-slate-100 bg-slate-50/70 px-6 py-4">
         <h3 className="font-semibold text-slate-900">اطلاعات پرسنلی در {tenant.name}</h3>
         <p className="mt-1 text-xs text-slate-500">کد پرسنلی و سمت توسط سازمان مدیریت می‌شود؛ این بخش فقط اطلاعات شخصی شماست.</p>
@@ -95,6 +95,8 @@ export function EmployeeProfileSettings({ tenant, employee }: Props) {
         {message && <p className={`text-sm ${message.includes('خطا') ? 'text-red-600' : 'text-emerald-600'}`}>{message}</p>}
         <Button type="submit" isLoading={saving}>ذخیره اطلاعات پرسنلی</Button>
       </form>
-    </Card>
+    </>
   )
+
+  return embedded ? <section className="overflow-hidden border-t border-slate-200">{content}</section> : <Card className="overflow-hidden">{content}</Card>
 }

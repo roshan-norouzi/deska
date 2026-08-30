@@ -1,6 +1,4 @@
 import {
-  Equals,
-  IsBoolean,
   IsEmail,
   IsNotEmpty,
   IsOptional,
@@ -10,10 +8,20 @@ import {
   MinLength,
 } from 'class-validator';
 
-export class RegisterDto {
+export class CreatePlatformUserDto {
+  @IsString({ message: 'نام باید متن باشد' })
+  @IsNotEmpty({ message: 'نام الزامی است' })
+  @MaxLength(120, { message: 'نام حداکثر ۱۲۰ کاراکتر است' })
+  name!: string;
+
   @IsEmail({}, { message: 'ایمیل معتبر نیست' })
   @IsNotEmpty({ message: 'ایمیل الزامی است' })
   email!: string;
+
+  @IsOptional()
+  @IsString({ message: 'شماره تلفن باید متن باشد' })
+  @Matches(/^(?:\+?[1-9]\d{7,14}|09\d{9})$/, { message: 'شماره تلفن معتبر نیست' })
+  phone?: string;
 
   @IsString({ message: 'رمز عبور باید متن باشد' })
   @IsNotEmpty({ message: 'رمز عبور الزامی است' })
@@ -24,18 +32,4 @@ export class RegisterDto {
   @IsString({ message: 'تکرار رمز عبور باید متن باشد' })
   @IsNotEmpty({ message: 'تکرار رمز عبور الزامی است' })
   confirmPassword!: string;
-
-  @IsString({ message: 'نام باید متن باشد' })
-  @IsNotEmpty({ message: 'نام الزامی است' })
-  @MaxLength(120, { message: 'نام حداکثر ۱۲۰ کاراکتر است' })
-  name!: string;
-
-  @IsOptional()
-  @IsString({ message: 'شماره تلفن باید متن باشد' })
-  @Matches(/^(?:\+?[1-9]\d{7,14}|09\d{9})$/, { message: 'شماره تلفن معتبر نیست' })
-  phone?: string;
-
-  @IsBoolean({ message: 'پذیرش قوانین باید مشخص شود' })
-  @Equals(true, { message: 'پذیرش قوانین برای ثبت‌نام الزامی است' })
-  acceptTerms!: boolean;
 }

@@ -2,8 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { Building2, ExternalLink, FileText, KeyRound, ShieldCheck, Trash2, User } from 'lucide-react';
+import { ExternalLink, FileText, KeyRound, ShieldCheck, Trash2, User } from 'lucide-react';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -19,7 +18,6 @@ interface ProfileUpdateResult {
 
 interface EmployeeProfilesResponse {
   profile: EmployeeProfileData;
-  organizations: Array<{ id: string; name: string; slug: string }>;
 }
 
 interface UserDocument {
@@ -217,35 +215,30 @@ export default function SettingsAccountPage() {
         </header>
 
         <Card className="overflow-hidden">
-          <CardHeader className="border-b border-slate-100 bg-slate-50/70"><CardTitle className="flex items-center gap-2 text-base"><User className="h-4 w-4" />اطلاعات کاربر</CardTitle></CardHeader>
-          <CardContent>
+          <CardHeader className="border-b border-slate-100 bg-slate-50/70"><CardTitle className="flex items-center gap-2 text-base"><User className="h-4 w-4" />اطلاعات کاربری و پرسنلی</CardTitle></CardHeader>
+          <CardContent className="p-0">
+            <div className="flex flex-wrap items-center gap-4 border-b border-slate-200 bg-slate-50 p-5">
+              {avatarPreview ? <img src={avatarPreview} alt="تصویر پروفایل" className="h-20 w-20 rounded-full object-cover ring-2 ring-white shadow" /> : <div className="grid h-20 w-20 place-items-center rounded-full bg-slate-200 text-slate-500"><User className="h-8 w-8" /></div>}
+              <div className="flex-1"><p className="text-sm font-medium text-slate-800">تصویر پروفایل</p><p className="mt-1 text-xs text-slate-500">JPG، PNG یا WebP؛ حداکثر ۵ مگابایت</p></div>
+              <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleAvatarUpload} />
+              <Button type="button" variant="outline" isLoading={avatarUploading} onClick={() => avatarInputRef.current?.click()}>بارگذاری تصویر</Button>
+            </div>
             <form onSubmit={handleProfileSave} className="space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
+              <div className="grid gap-4 px-6 pt-5 sm:grid-cols-2">
                 <Input label="نام و نام خانوادگی" value={name} onChange={(event) => setName(event.target.value)} required maxLength={120} />
                 <Input label="ایمیل" type="email" dir="ltr" value={email} onChange={(event) => setEmail(event.target.value)} required autoComplete="email" />
                 <Input label="شماره موبایل" dir="ltr" value={phone} onChange={(event) => setPhone(event.target.value)} placeholder="0912... یا +98912..." autoComplete="tel" />
               </div>
-              <div className="flex flex-wrap items-center gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                {avatarPreview ? <img src={avatarPreview} alt="تصویر پروفایل" className="h-16 w-16 rounded-full object-cover ring-2 ring-white shadow" /> : <div className="grid h-16 w-16 place-items-center rounded-full bg-slate-200 text-slate-500"><User className="h-7 w-7" /></div>}
-                <div className="flex-1"><p className="text-sm font-medium text-slate-800">تصویر پروفایل</p><p className="mt-1 text-xs text-slate-500">JPG، PNG یا WebP؛ حداکثر ۵ مگابایت</p></div>
-                <input ref={avatarInputRef} type="file" accept="image/jpeg,image/png,image/webp" className="hidden" onChange={handleAvatarUpload} />
-                <Button type="button" variant="outline" isLoading={avatarUploading} onClick={() => avatarInputRef.current?.click()}>بارگذاری تصویر</Button>
+              <div className="space-y-4 px-6 pb-5">
+                {email.trim().toLowerCase() !== user?.email.toLowerCase() && (
+                  <Input label="رمز فعلی برای تأیید تغییر ایمیل" type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} required autoComplete="current-password" />
+                )}
+                {error && <p className="text-sm text-red-600">{error}</p>}
+                {message && <p className="text-sm text-green-600">{message}</p>}
+                <Button type="submit" isLoading={savingProfile}>ذخیره اطلاعات حساب</Button>
               </div>
-              {email.trim().toLowerCase() !== user?.email.toLowerCase() && (
-                <Input label="رمز فعلی برای تأیید تغییر ایمیل" type="password" value={profilePassword} onChange={(event) => setProfilePassword(event.target.value)} required autoComplete="current-password" />
-              )}
-              {error && <p className="text-sm text-red-600">{error}</p>}
-              {message && <p className="text-sm text-green-600">{message}</p>}
-              <Button type="submit" isLoading={savingProfile}>ذخیره اطلاعات حساب</Button>
             </form>
-          </CardContent>
-        </Card>
-
-        <Card className="overflow-hidden">
-          <CardHeader className="flex flex-row items-center justify-between border-b border-slate-100 bg-slate-50/70"><div><CardTitle className="flex items-center gap-2 text-base"><Building2 className="h-4 w-4" />سازمان‌های من</CardTitle><p className="mt-1 text-xs text-slate-500">اطلاعات پرسنلی شما بین سازمان‌های عضو مشترک است.</p></div><Link href="/organizations"><Button type="button" variant="outline" size="sm">افزودن سازمان جدید</Button></Link></CardHeader>
-          <CardContent className="space-y-5">
-            {profilesLoading ? <div className="py-6 text-center text-sm text-slate-500">در حال دریافت پروفایل پرسنلی...</div> : !employeeProfiles ? <p className="text-sm text-slate-500">پروفایل پرسنلی هنوز ایجاد نشده است.</p> : <EmployeeProfileSettings tenant={{ id: 'global', name: 'همه سازمان‌های شما' }} employee={employeeProfiles.profile} />}
-            {employeeProfiles?.organizations.length ? <p className="text-xs text-slate-500">این اطلاعات در سازمان‌های زیر مشترک است: {employeeProfiles.organizations.map((organization) => organization.name).join('، ')}</p> : null}
+            {profilesLoading ? <div className="border-t border-slate-200 py-6 text-center text-sm text-slate-500">در حال دریافت اطلاعات پرسنلی...</div> : !employeeProfiles ? <p className="border-t border-slate-200 px-6 py-5 text-sm text-slate-500">اطلاعات پرسنلی در دسترس نیست.</p> : <EmployeeProfileSettings embedded tenant={{ id: 'global', name: 'همه سازمان‌های شما' }} employee={employeeProfiles.profile} />}
           </CardContent>
         </Card>
 

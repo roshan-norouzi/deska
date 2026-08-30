@@ -8,7 +8,6 @@ import { clearTenantId, setTenantId } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import Link from 'next/link';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -97,12 +96,6 @@ export default function LoginPage() {
             <Button type="submit" className="w-full" isLoading={submitting}>
               ورود
             </Button>
-            <p className="text-center text-sm text-slate-500">
-              حساب کاربری ندارید؟{' '}
-              <Link href="/register" className="font-semibold text-primary-700 hover:text-primary-800">
-                ثبت‌نام در دسکا
-              </Link>
-            </p>
           </form>
         </CardContent>
       </Card>

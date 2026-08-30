@@ -21,19 +21,28 @@ if (Test-Path $configPath) {
 }
 
 if (-not $SkipSystemExport -and (Get-Command docker -ErrorAction SilentlyContinue)) {
-  if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
-    throw 'pnpm is required to prepare the local Prisma Client before exporting system observances.'
-  }
-  Write-Host 'Preparing Prisma Client for the local PostgreSQL database...' -ForegroundColor Cyan
-  & pnpm --filter @deska/api exec prisma generate
-  if ($LASTEXITCODE -ne 0) {
-    throw 'Unable to generate the local Prisma Client. Close processes locking Prisma files and retry.'
-  }
   Write-Host 'Exporting local system observances...' -ForegroundColor Cyan
   $prismaPath = Join-Path $projectRoot 'apps/api/prisma'
   try {
-    $exported = @(node (Join-Path $prismaPath 'export-system-observances.cjs') --base64 2>$null)
-    if ($LASTEXITCODE -ne 0) { throw 'Unable to export system observances.' }
+    $exported = @(node (Join-Path $prismaPath 'export-system-observances.cjs') --base64 2>&1)
+    $exportExitCode = $LASTEXITCODE
+    if ($exportExitCode -ne 0) {
+      $diagnostic = ($exported | Out-String)
+      $requiresLocalEngine = $diagnostic -match 'P6001|prisma\+postgres|prisma://'
+      if (-not $requiresLocalEngine) { throw 'Unable to export system observances. Verify the local PostgreSQL service and applied migrations.' }
+
+      if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+        throw 'The local Prisma Client needs repair, but pnpm is not available.'
+      }
+      Write-Host 'Repairing Prisma Client for the local PostgreSQL database...' -ForegroundColor Cyan
+      & pnpm --filter @deska/api exec prisma generate
+      if ($LASTEXITCODE -ne 0) {
+        throw 'The local Prisma Client needs repair but its engine file is locked. Stop the local API and web development processes once, then retry.'
+      }
+
+      $exported = @(node (Join-Path $prismaPath 'export-system-observances.cjs') --base64 2>&1)
+      if ($LASTEXITCODE -ne 0) { throw 'Unable to export system observances after repairing Prisma Client.' }
+    }
     $encoded = ($exported -join '').Trim()
     try { $bytes = [Convert]::FromBase64String($encoded); $json = [Text.Encoding]::UTF8.GetString($bytes) } catch { throw 'Export did not return valid UTF-8 data.' }
     if (-not $json.Trim().StartsWith('[')) { throw 'Export did not return valid JSON.' }

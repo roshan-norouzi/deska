@@ -24,7 +24,7 @@ function likelyImageUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
-    if (/gravatar|avatar/iu.test(url.hostname + url.pathname) || /\.(?:avif|gif|jpe?g|png|svg|webp)(?:$|[?#])/iu.test(url.pathname + url.search)) return value;
+    if (['http:', 'https:'].includes(url.protocol)) return value;
   } catch { /* invalid values are discarded */ }
   return null;
 }

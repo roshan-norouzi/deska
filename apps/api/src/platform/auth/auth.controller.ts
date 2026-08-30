@@ -26,7 +26,6 @@ import { AuthService } from './auth.service';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { LoginDto } from './dto/login.dto';
 import { RefreshDto } from './dto/refresh.dto';
-import { RegisterDto } from './dto/register.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { UpdateProfileDto } from './dto/update-profile.dto';
@@ -50,18 +49,6 @@ export class AuthController {
     @Res({ passthrough: true }) response: Response,
   ) {
     const result = await this.authService.login(dto);
-    this.setAuthCookies(response, result.accessToken, result.refreshToken);
-    return result;
-  }
-
-  @Public()
-  @Throttle({ default: { limit: 3, ttl: 60_000 } })
-  @Post('register')
-  async register(
-    @Body() dto: RegisterDto,
-    @Res({ passthrough: true }) response: Response,
-  ) {
-    const result = await this.authService.register(dto);
     this.setAuthCookies(response, result.accessToken, result.refreshToken);
     return result;
   }

@@ -6,6 +6,8 @@ import * as path from 'node:path';
 import type { AuthUser } from '../../common/decorators/params.decorator';
 import { PrismaService } from '../../prisma/prisma.service';
 import type { DeletePlatformEntityDto } from './dto/delete-platform-entity.dto';
+import type { CreatePlatformUserDto } from './dto/create-platform-user.dto';
+import { AuthService } from '../auth/auth.service';
 
 type ListQuery = { q?: string; status?: string; role?: string; page?: string; limit?: string };
 
@@ -13,7 +15,10 @@ type ListQuery = { q?: string; status?: string; role?: string; page?: string; li
 export class PlatformAdminService {
   private readonly logger = new Logger(PlatformAdminService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly authService: AuthService,
+  ) {}
 
   async overview(actor: AuthUser) {
     this.assertAdmin(actor);
@@ -61,6 +66,38 @@ export class PlatformAdminService {
       this.prisma.user.count({ where }),
     ]);
     return { items, total, page, limit: take };
+  }
+
+  async createUser(actor: AuthUser, dto: CreatePlatformUserDto) {
+    this.assertSuperAdmin(actor);
+    if (dto.password !== dto.confirmPassword) {
+      throw new BadRequestException('رمز عبور و تکرار آن یکسان نیست');
+    }
+
+    const user = await this.authService.registerUser({
+      name: dto.name,
+      email: dto.email,
+      phone: dto.phone,
+      password: dto.password,
+    });
+    await this.prisma.auditLog.create({
+      data: {
+        tenantId: null,
+        userId: actor.id,
+        action: 'platform.user_created',
+        entityType: 'User',
+        entityId: user.id,
+        changes: { createdRole: user.role },
+      },
+    });
+    return {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      phone: user.phone,
+      role: user.role,
+      status: user.status,
+    };
   }
 
   async getUser(actor: AuthUser, id: string) {

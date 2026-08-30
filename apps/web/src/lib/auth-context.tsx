@@ -51,15 +51,6 @@ interface LoginResponse {
   user: AuthUser;
 }
 
-interface RegisterInput {
-  name: string;
-  email: string;
-  phone?: string;
-  password: string;
-  confirmPassword: string;
-  acceptTerms: boolean;
-}
-
 interface AuthContextValue {
   user: AuthUser | null;
   isLoading: boolean;
@@ -67,7 +58,6 @@ interface AuthContextValue {
   isSuperAdmin: boolean;
   isPlatformAdmin: boolean;
   login: (email: string, password: string) => Promise<AuthUser>;
-  register: (input: RegisterInput) => Promise<AuthUser>;
   logout: () => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -110,19 +100,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return me;
   }, []);
 
-  const register = useCallback(async (input: RegisterInput) => {
-    await apiFetch<LoginResponse>('/auth/register', {
-      method: 'POST',
-      body: input,
-      skipAuth: true,
-      skipTenant: true,
-    });
-
-    const me = await apiFetch<AuthUser>('/auth/me');
-    setUser(me);
-    return me;
-  }, []);
-
   const logout = useCallback(async () => {
     clearTokens();
     clearTenantId();
@@ -148,11 +125,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isPlatformAdmin:
         user?.role === PLATFORM_ROLES.SUPER_ADMIN || user?.role === PLATFORM_ROLES.ADMIN,
       login,
-      register,
       logout,
       refresh,
     }),
-    [user, isLoading, login, register, logout, refresh],
+    [user, isLoading, login, logout, refresh],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

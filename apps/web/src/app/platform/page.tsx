@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Building2, Crown, Search, Trash2, Users } from 'lucide-react';
+import { Building2, Crown, Search, Trash2, UserPlus, Users } from 'lucide-react';
 import { PLATFORM_ROLES, TENANT_ROLE_LABELS, type TenantRole } from '@deska/shared';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +30,9 @@ export default function PlatformPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [deletingId, setDeletingId] = useState('');
+  const [showCreateUser, setShowCreateUser] = useState(false);
+  const [creatingUser, setCreatingUser] = useState(false);
+  const [newUser, setNewUser] = useState({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -57,6 +60,24 @@ export default function PlatformPage() {
   const patchOrganization = async (id: string, status: string) => {
     await apiFetch(`/platform/organizations/${id}/status`, { method: 'PATCH', body: { status }, skipTenant: true });
     await load();
+  };
+  const createUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (newUser.password !== newUser.confirmPassword) {
+      setError('رمز عبور و تکرار آن یکسان نیست');
+      return;
+    }
+    setCreatingUser(true); setError('');
+    try {
+      await apiFetch('/platform/users', {
+        method: 'POST', skipTenant: true,
+        body: { ...newUser, name: newUser.name.trim(), email: newUser.email.trim(), phone: newUser.phone.trim() || undefined },
+      });
+      setNewUser({ name: '', email: '', phone: '', password: '', confirmPassword: '' });
+      setShowCreateUser(false);
+      await load();
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'ایجاد کاربر انجام نشد'); }
+    finally { setCreatingUser(false); }
   };
   const openOrganization = async (id: string) => {
     const result = await apiFetch<OrganizationDetail>(`/platform/organizations/${id}`, { skipTenant: true });
@@ -109,8 +130,9 @@ export default function PlatformPage() {
     <main className="mx-auto max-w-7xl space-y-5" dir="rtl">
       <section className="rounded-3xl bg-slate-950 p-6 text-white"><h1 className="text-2xl font-bold">مدیریت پلتفرم</h1><p className="mt-2 text-sm text-slate-300">کاربران مستقل، عضویت‌های سازمانی، سازمان‌ها و مالکیت‌ها</p></section>
       {overview && <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">{[['کل کاربران', overview.users], ['کاربران فعال', overview.activeUsers], ['کل سازمان‌ها', overview.organizations], ['سازمان‌های فعال', overview.activeOrganizations], ['عضویت‌ها', overview.memberships]].map(([label, value]) => <Card key={String(label)}><CardContent className="p-4"><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-2xl font-bold">{value}</p></CardContent></Card>)}</div>}
-      <Card><CardHeader><div className="flex flex-wrap justify-between gap-3"><div className="flex gap-2"><Button variant={tab === 'users' ? 'primary' : 'outline'} onClick={() => setTab('users')}><Users className="h-4 w-4" />کاربران</Button><Button variant={tab === 'organizations' ? 'primary' : 'outline'} onClick={() => setTab('organizations')}><Building2 className="h-4 w-4" />سازمان‌ها</Button></div><div className="relative w-full sm:w-80"><Search className="absolute right-3 top-3 h-4 w-4 text-slate-400" /><Input className="pr-9" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="جستجو..." /></div></div></CardHeader><CardContent>
+      <Card><CardHeader><div className="flex flex-wrap justify-between gap-3"><div className="flex gap-2"><Button variant={tab === 'users' ? 'primary' : 'outline'} onClick={() => setTab('users')}><Users className="h-4 w-4" />کاربران</Button><Button variant={tab === 'organizations' ? 'primary' : 'outline'} onClick={() => setTab('organizations')}><Building2 className="h-4 w-4" />سازمان‌ها</Button></div><div className="flex w-full flex-wrap gap-2 sm:w-auto"><div className="relative min-w-56 flex-1 sm:w-80"><Search className="absolute right-3 top-3 h-4 w-4 text-slate-400" /><Input className="pr-9" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="جستجو..." /></div>{isSuperAdmin && tab === 'users' && <Button type="button" onClick={() => setShowCreateUser((visible) => !visible)}><UserPlus className="h-4 w-4" />افزودن کاربر</Button>}</div></div></CardHeader><CardContent>
         {error && <div className="mb-3 rounded-xl bg-red-50 p-3 text-sm text-red-700">{error}</div>}
+        {isSuperAdmin && showCreateUser && <form onSubmit={createUser} className="mb-5 grid gap-3 rounded-2xl border border-primary-100 bg-primary-50/40 p-4 sm:grid-cols-2"><Input label="نام و نام خانوادگی" value={newUser.name} onChange={(event) => setNewUser((current) => ({ ...current, name: event.target.value }))} required /><Input label="ایمیل" type="email" dir="ltr" value={newUser.email} onChange={(event) => setNewUser((current) => ({ ...current, email: event.target.value }))} required /><Input label="شماره موبایل (اختیاری)" dir="ltr" value={newUser.phone} onChange={(event) => setNewUser((current) => ({ ...current, phone: event.target.value }))} /><Input label="رمز عبور اولیه" type="password" value={newUser.password} onChange={(event) => setNewUser((current) => ({ ...current, password: event.target.value }))} required minLength={12} autoComplete="new-password" /><Input label="تکرار رمز عبور" type="password" value={newUser.confirmPassword} onChange={(event) => setNewUser((current) => ({ ...current, confirmPassword: event.target.value }))} required minLength={12} autoComplete="new-password" /><div className="flex items-end gap-2"><Button type="submit" isLoading={creatingUser}>ایجاد کاربر</Button><Button type="button" variant="ghost" onClick={() => setShowCreateUser(false)}>انصراف</Button></div></form>}
         {loading ? <div className="py-12 text-center text-slate-500">در حال دریافت...</div> : tab === 'users' ? <div className="space-y-3">{users.map((user) => <article key={user.id} className="rounded-2xl border p-4"><div className="flex flex-wrap items-start gap-3"><div className="min-w-0 flex-1"><h2 className="font-semibold">{user.name}</h2><p className="text-sm text-slate-500" dir="ltr">{user.email}</p><div className="mt-2 flex flex-wrap gap-1">{user.tenantMembers.map((membership) => <Badge key={membership.tenant.id} variant={membership.tenant.primaryOwnerUserId === user.id ? 'warning' : 'default'}>{membership.tenant.primaryOwnerUserId === user.id && <Crown className="ml-1 h-3 w-3" />}{membership.tenant.name} · {TENANT_ROLE_LABELS[membership.role as TenantRole] ?? membership.role}</Badge>)}</div></div><select value={user.role} aria-label="نقش پلتفرم" onChange={(e) => void patchUser(user.id, 'role', e.target.value)} className="rounded-xl border px-3 py-2 text-sm"><option value={PLATFORM_ROLES.USER}>کاربر</option><option value={PLATFORM_ROLES.ADMIN}>مدیر پلتفرم</option><option value={PLATFORM_ROLES.SUPER_ADMIN}>مدیر کل</option></select><StatusSelect value={user.status} onChange={(value) => void patchUser(user.id, 'status', value)} kind="user" /><Button variant="danger" isLoading={deletingId === user.id} onClick={() => void deleteUser(user)}><Trash2 className="h-4 w-4" />حذف دائمی</Button></div></article>)}</div>
         : <div className="space-y-3">{organizations.map((organization) => <article key={organization.id} className="rounded-2xl border p-4"><div className="flex flex-wrap items-center gap-3"><div className="min-w-0 flex-1"><h2 className="font-semibold">{organization.name}</h2><p className="text-sm text-slate-500"><span dir="ltr">{organization.slug}</span> · {organization._count.members} عضو · مالک: {organization.primaryOwner?.name ?? 'تعیین نشده'}</p></div><StatusSelect value={organization.status} onChange={(value) => void patchOrganization(organization.id, value)} kind="organization" /><Button variant="outline" onClick={() => void openOrganization(organization.id)}>اعضا و مالکیت</Button><Button variant="danger" isLoading={deletingId === organization.id} onClick={() => void deleteOrganization(organization)}><Trash2 className="h-4 w-4" />حذف دائمی</Button></div></article>)}</div>}
       </CardContent></Card>
