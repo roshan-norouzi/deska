@@ -71,6 +71,8 @@ export interface CoverTemplateLibrary {
 export interface CoverFont {
   id: string;
   name: string;
+  variant?: string;
+  weight?: number;
   url?: string;
 }
 
@@ -305,17 +307,23 @@ export async function renderCoverToDataUrl(templateValue: string, article?: Cove
   // Wait for custom uploaded fonts before measuring/drawing text; otherwise
   // canvas silently falls back to a system font and line wrapping is wrong.
   if (typeof document !== 'undefined' && document.fonts) {
-    const families = [...new Set(template.layers.filter((layer) => layer.type === 'text').map((layer) => layer.fontFamily || 'Vazirmatn'))];
-    await Promise.all(families.map(async (family) => {
-      const registered = fontLibrary.find((font) => font.name === family && font.url);
+    const requestedFonts = Array.from(new Map(template.layers.filter((layer) => layer.type === 'text').map((layer) => {
+      const family = layer.fontFamily || 'Vazirmatn';
+      const requestedWeight = layer.fontWeight || 500;
+      const candidates = fontLibrary.filter((font) => font.name === family && font.url);
+      const registered = candidates.find((font) => font.weight === requestedWeight)
+        || candidates.sort((a, b) => Math.abs((a.weight || 400) - requestedWeight) - Math.abs((b.weight || 400) - requestedWeight))[0];
+      return [`${family}:${registered?.weight || requestedWeight}`, { family, registered, weight: registered?.weight || requestedWeight }] as const;
+    })).values());
+    await Promise.all(requestedFonts.map(async ({ family, registered, weight }) => {
       if (registered?.url) {
         try {
-          const face = new FontFace(family, `url(${withBasePath(`/api${registered.url}`)})`);
+          const face = new FontFace(family, `url(${withBasePath(`/api${registered.url}`)})`, { weight: String(weight) });
           await waitWithTimeout(face.load());
           document.fonts.add(face);
         } catch { /* CSS @font-face remains the fallback path. */ }
       }
-      await waitWithTimeout(document.fonts.load(`500 24px "${family.replace(/"/gu, '')}"`));
+      await waitWithTimeout(document.fonts.load(`${weight} 24px "${family.replace(/"/gu, '')}"`));
     }));
     await waitWithTimeout(document.fonts.ready);
   }
@@ -404,6 +412,7 @@ export function CoverTemplateBuilder({ value, onChange, fontLibrary = [{ id: 'va
   const [selectedId, setSelectedId] = useState(template.layers.at(-1)?.id || '');
   const [uploadingImage, setUploadingImage] = useState(false);
   const [imageUploadError, setImageUploadError] = useState('');
+  const [fontSizeDraft, setFontSizeDraft] = useState<string | null>(null);
   const [proxiedImages, setProxiedImages] = useState<Record<string, string>>({});
   const [draggingLayerId, setDraggingLayerId] = useState<string | null>(null);
   const [dragOverLayerId, setDragOverLayerId] = useState<string | null>(null);
@@ -420,6 +429,8 @@ export function CoverTemplateBuilder({ value, onChange, fontLibrary = [{ id: 'va
       && layer.x + layer.width >= selected.x + selected.width
       && layer.y + layer.height >= selected.y + selected.height;
   }) : undefined;
+
+  useEffect(() => { setFontSizeDraft(null); }, [selected?.id]);
 
   const remoteImageUrls = useMemo(() => [demoArticle?.featuredImageUrl, demoArticle?.authorImageUrl, ...template.layers.filter((layer) => layer.type === 'image').map((layer) => layer.imageUrl)].filter((url): url is string => Boolean(url && /^https?:\/\//iu.test(url))), [demoArticle?.authorImageUrl, demoArticle?.featuredImageUrl, template.layers]);
 
@@ -505,7 +516,8 @@ export function CoverTemplateBuilder({ value, onChange, fontLibrary = [{ id: 'va
 
   const previewScale = 100 / Math.max(template.width, template.height);
 
-  const fontFaceCss = fontLibrary.filter((font) => font.url).map((font) => `@font-face{font-family:'${font.name.replace(/'/g, '')}';src:url('${withBasePath(`/api${font.url!}`)}');font-display:swap;}`).join('\n');
+  const fontFamilies = Array.from(new Map(fontLibrary.map((font) => [font.name, font])).values());
+  const fontFaceCss = fontLibrary.filter((font) => font.url).map((font) => `@font-face{font-family:'${font.name.replace(/'/g, '')}';src:url('${withBasePath(`/api${font.url!}`)}');font-weight:${font.weight || 400};font-style:normal;font-display:swap;}`).join('\n');
   return <div className="grid gap-5 xl:grid-cols-[minmax(0,1.1fr)_minmax(340px,.9fr)]">
     {fontFaceCss && <style>{fontFaceCss}</style>}
     <div className="space-y-4">
@@ -569,7 +581,7 @@ export function CoverTemplateBuilder({ value, onChange, fontLibrary = [{ id: 'va
         {selected.type === 'text' && <>
           <label className="grid gap-1 text-xs text-slate-600">محتوای لایه<select className="rounded-lg border px-3 py-2 text-sm" value={selected.binding || 'custom'} onChange={(e) => { const binding = e.target.value as Binding; updateLayer(selected.id, { binding, name: BINDINGS.find((item) => item.value === binding)?.label || selected.name }); }}>{BINDINGS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           {selected.binding === 'custom' && <label className="grid gap-1 text-xs text-slate-600">متن دلخواه<textarea className="min-h-20 rounded-lg border px-3 py-2 text-sm" value={selected.content || ''} onChange={(e) => updateLayer(selected.id, { content: e.target.value })} /></label>}
-          <div className="grid grid-cols-2 gap-3"><label className="grid gap-1 text-xs text-slate-600">فونت<select className="rounded-lg border px-2 py-2 text-sm" value={selected.fontFamily || fontLibrary[0]?.name || 'Vazirmatn'} onChange={(e) => updateLayer(selected.id, { fontFamily: e.target.value })}>{fontLibrary.map((font) => <option key={font.id} value={font.name}>{font.name}</option>)}</select></label><label className="grid gap-1 text-xs text-slate-600">اندازه قلم<input type="number" min="8" max="160" className="rounded-lg border px-2 py-2 text-sm" value={selected.fontSize || 24} onChange={(e) => updateLayer(selected.id, { fontSize: Math.max(8, Math.min(160, Number(e.target.value))) })} /></label><label className="grid gap-1 text-xs text-slate-600">ضخامت قلم<select className="rounded-lg border px-2 py-2 text-sm" value={selected.fontWeight || 500} onChange={(e) => updateLayer(selected.id, { fontWeight: Number(e.target.value) })}><option value="400">معمولی</option><option value="500">متوسط</option><option value="700">ضخیم</option><option value="800">خیلی ضخیم</option></select></label><label className="grid gap-1 text-xs text-slate-600">رنگ متن<input type="color" className="h-10 w-full rounded-lg border p-1" value={selected.color || '#ffffff'} onChange={(e) => updateLayer(selected.id, { color: e.target.value })} /></label><label className="grid gap-1 text-xs text-slate-600">رنگ پس‌زمینه<input type="color" className="h-10 w-full rounded-lg border p-1" value={selected.backgroundColor === 'transparent' ? '#ffffff' : selected.backgroundColor || '#ffffff'} onChange={(e) => updateLayer(selected.id, { backgroundColor: e.target.value })} /></label><label className="grid gap-1 text-xs text-slate-600">شفافیت پس‌زمینه<input type="number" min="0" max="100" className="rounded-lg border px-2 py-2 text-sm" value={selected.backgroundOpacity ?? 100} onChange={(e) => updateLayer(selected.id, { backgroundOpacity: Math.max(0, Math.min(100, Number(e.target.value))) })} /></label></div>
+          <div className="grid grid-cols-2 gap-3"><label className="grid gap-1 text-xs text-slate-600">فونت<select className="rounded-lg border px-2 py-2 text-sm" value={selected.fontFamily || fontFamilies[0]?.name || 'Vazirmatn'} onChange={(e) => updateLayer(selected.id, { fontFamily: e.target.value })}>{fontFamilies.map((font) => <option key={font.id} value={font.name}>{font.name}</option>)}</select></label><label className="grid gap-1 text-xs text-slate-600">اندازه قلم<input type="number" min="8" max="160" inputMode="numeric" className="rounded-lg border px-2 py-2 text-sm" value={fontSizeDraft ?? String(selected.fontSize || 24)} onFocus={() => setFontSizeDraft(String(selected.fontSize || 24))} onChange={(e) => setFontSizeDraft(e.target.value)} onBlur={() => { const size = Number(fontSizeDraft); if (Number.isFinite(size) && size > 0) updateLayer(selected.id, { fontSize: Math.max(8, Math.min(160, size)) }); setFontSizeDraft(null); }} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }} /></label><label className="grid gap-1 text-xs text-slate-600">ضخامت قلم<select className="rounded-lg border px-2 py-2 text-sm" value={selected.fontWeight || 500} onChange={(e) => updateLayer(selected.id, { fontWeight: Number(e.target.value) })}><option value="100">Thin · خیلی نازک</option><option value="200">Extra Light · نازک</option><option value="300">Light · سبک</option><option value="400">Regular · معمولی</option><option value="500">Medium · متوسط</option><option value="600">Semi Bold · نیمه‌ضخیم</option><option value="700">Bold · ضخیم</option><option value="800">Extra Bold · خیلی ضخیم</option><option value="900">Black · مشکی</option></select></label><label className="grid gap-1 text-xs text-slate-600">رنگ متن<input type="color" className="h-10 w-full rounded-lg border p-1" value={selected.color || '#ffffff'} onChange={(e) => updateLayer(selected.id, { color: e.target.value })} /></label><label className="grid gap-1 text-xs text-slate-600">رنگ پس‌زمینه<input type="color" className="h-10 w-full rounded-lg border p-1" value={selected.backgroundColor === 'transparent' ? '#ffffff' : selected.backgroundColor || '#ffffff'} onChange={(e) => updateLayer(selected.id, { backgroundColor: e.target.value })} /></label><label className="grid gap-1 text-xs text-slate-600">شفافیت پس‌زمینه<input type="number" min="0" max="100" className="rounded-lg border px-2 py-2 text-sm" value={selected.backgroundOpacity ?? 100} onChange={(e) => updateLayer(selected.id, { backgroundOpacity: Math.max(0, Math.min(100, Number(e.target.value))) })} /></label></div>
           <div className="flex flex-wrap gap-2"><Button type="button" size="sm" aria-label="راست‌چین" title="راست‌چین" variant={selected.align === 'right' ? 'primary' : 'outline'} onClick={() => updateLayer(selected.id, { align: 'right' })}><AlignRight className="h-4 w-4" /> راست‌چین</Button><Button type="button" size="sm" aria-label="وسط‌چین" title="وسط‌چین" variant={selected.align === 'center' ? 'primary' : 'outline'} onClick={() => updateLayer(selected.id, { align: 'center' })}><AlignCenter className="h-4 w-4" /> وسط‌چین</Button><Button type="button" size="sm" aria-label="چپ‌چین" title="چپ‌چین" variant={selected.align === 'left' ? 'primary' : 'outline'} onClick={() => updateLayer(selected.id, { align: 'left' })}><AlignLeft className="h-4 w-4" /> چپ‌چین</Button><Button type="button" size="sm" aria-label="جاستیفای" title="جاستیفای" variant={selected.align === 'justify' ? 'primary' : 'outline'} onClick={() => updateLayer(selected.id, { align: 'justify' })}>☰ جاستیفای</Button></div>
         </>}
       </div>}

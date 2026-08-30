@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Bot, CheckCircle2, Clock3, Copy, Globe2, KeyRound, Plus, Save, Settings2, Share2, Star, TestTube2, Upload, Trash2, Pencil } from 'lucide-react';
+import { Bot, CheckCircle2, Clock3, Copy, Globe2, KeyRound, Plus, Save, Settings2, Share2, Star, TestTube2, Upload, Trash2 } from 'lucide-react';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { CoverTemplateBuilder, parseTemplate, parseTemplateLibrary, type CoverDemoArticle, type CoverFont, type CoverTemplateLibrary } from '@/components/publishing/cover-template-builder';
 import { Button } from '@/components/ui/button';
@@ -43,7 +43,12 @@ function parseFontLibrary(value?: string): CoverFont[] {
   try {
     const fonts = JSON.parse(value || '[]');
     if (Array.isArray(fonts)) {
-      const normalized = fonts.map((font, index) => typeof font === 'string' ? { id: `legacy-${index}`, name: font.trim() } : { id: String(font?.id || `font-${index}`), name: String(font?.name || '').trim(), url: font?.url ? String(font.url) : undefined }).filter((font) => font.name);
+      const normalized = fonts.map((font, index) => {
+        const item = typeof font === 'string' ? { id: `legacy-${index}`, name: font.trim() } : font;
+        const variant = String(item?.variant || 'regular');
+        const weights: Record<string, number> = { thin: 100, 'extra-light': 200, light: 300, regular: 400, medium: 500, 'semi-bold': 600, bold: 700, 'extra-bold': 800, black: 900 };
+        return { id: String(item?.id || `font-${index}`), name: String(item?.name || '').trim(), variant, weight: Number(item?.weight) || weights[variant] || 400, url: item?.url ? String(item.url) : undefined };
+      }).filter((font) => font.name);
       if (normalized.length) return normalized.filter((font) => font.name === 'Vazirmatn' || font.url);
     }
   } catch { /* Older settings did not have a font library. */ }
@@ -64,27 +69,37 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 function FontLibrary({ value, onChange }: { value: CoverFont[]; onChange: (fonts: CoverFont[]) => void }) {
+  const variants = [
+    ['thin', 'Thin · خیلی نازک'], ['extra-light', 'Extra Light · نازک'], ['light', 'Light · سبک'], ['regular', 'Regular · معمولی'], ['medium', 'Medium · متوسط'], ['semi-bold', 'Semi Bold · نیمه‌ضخیم'], ['bold', 'Bold · ضخیم'], ['extra-bold', 'Extra Bold · خیلی ضخیم'], ['black', 'Black · مشکی'],
+  ] as const;
+  const variantLabel = (variant?: string) => variants.find(([id]) => id === variant)?.[1] || 'Regular · معمولی';
   const [name, setName] = useState('');
+  const [variant, setVariant] = useState<(typeof variants)[number][0]>('regular');
+  const [familyVariants, setFamilyVariants] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
   const [error, setError] = useState('');
-  async function upload(file: File) {
+  const families = Array.from(value.reduce((groups, font) => {
+    const key = font.name.toLocaleLowerCase('en-US');
+    const current = groups.get(key) || { name: font.name, fonts: [] as CoverFont[] };
+    current.fonts.push(font); groups.set(key, current);
+    return groups;
+  }, new Map<string, { name: string; fonts: CoverFont[] }>() ).values());
+  async function upload(file: File, familyName = name, selectedVariant: string = variant) {
+    const finalName = familyName.trim() || file.name.replace(/\.[^.]+$/, '');
     setBusy(true); setError('');
     try {
-      const form = new FormData(); form.append('file', file); form.append('name', name || file.name.replace(/\.[^.]+$/, ''));
+      const form = new FormData(); form.append('file', file); form.append('name', finalName); form.append('variant', selectedVariant);
       const font = await apiFetch<CoverFont>('/publishing/settings/fonts', { method: 'POST', body: form });
-      onChange([...value.filter((item) => item.id !== font.id && item.name !== font.name), font]); setName('');
+      onChange([...value.filter((item) => item.id !== font.id && !(item.name.toLocaleLowerCase('en-US') === font.name.toLocaleLowerCase('en-US') && item.variant === font.variant)), font]); setName('');
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : 'بارگذاری فونت انجام نشد');
     } finally { setBusy(false); }
   }
   async function remove(id: string) { setBusy(true); setError(''); try { await apiFetch(`/publishing/settings/fonts/${id}`, { method: 'DELETE' }); onChange(value.filter((font) => font.id !== id)); } catch (reason) { setError(reason instanceof ApiError ? reason.message : 'حذف فونت انجام نشد'); } finally { setBusy(false); } }
-  function rename(id: string) { const next = name.trim(); if (!next || id === 'vazirmatn') return; onChange(value.map((font) => font.id === id ? { ...font, name: next } : font)); setEditing(null); setName(''); }
   return <div className="mt-6 space-y-5">
-    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4"><h3 className="font-bold text-slate-900">افزودن فونت اختصاصی</h3><p className="mt-1 text-sm leading-6 text-slate-600">فقط فایل‌های woff2، woff، ttf و otf تا حجم ۱۰ مگابایت پذیرفته می‌شوند.</p><div className="mt-4 flex flex-col gap-2 sm:flex-row"><input dir="ltr" className="min-w-0 flex-1 rounded-xl border bg-white px-3 py-2.5" placeholder="نام نمایشی فونت (اختیاری)" value={name} onChange={(e) => setName(e.target.value)} /><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><Upload className="h-4 w-4" /> انتخاب و آپلود<input type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf" className="hidden" disabled={busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.currentTarget.value = ''; }} /></label></div></div>
+    <div className="rounded-2xl border border-blue-100 bg-blue-50/60 p-4"><h3 className="font-bold text-slate-900">ایجاد خانواده فونت</h3><p className="mt-1 text-sm leading-6 text-slate-600">نام خانواده را وارد کنید، Variant فایل را انتخاب کنید و آن را بارگذاری کنید. بعداً می‌توانید Variantهای دیگر همین خانواده را اضافه یا جایگزین کنید.</p><div className="mt-4 grid gap-2 sm:grid-cols-[minmax(0,1fr)_13rem_auto]"><input dir="ltr" className="min-w-0 rounded-xl border bg-white px-3 py-2.5" placeholder="نام خانواده فونت" value={name} onChange={(e) => setName(e.target.value)} /><select className="rounded-xl border bg-white px-3 py-2.5 text-sm" value={variant} onChange={(e) => setVariant(e.target.value as typeof variant)}>{variants.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-blue-700"><Upload className="h-4 w-4" /> آپلود فایل<input type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf" className="hidden" disabled={busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file); e.currentTarget.value = ''; }} /></label></div><p className="mt-2 text-xs text-slate-500">فقط فایل‌های woff2، woff، ttf و otf تا حجم ۱۰ مگابایت پذیرفته می‌شوند.</p></div>
     {error && <p role="alert" className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-    <div className="grid gap-3 sm:grid-cols-2">{value.map((font) => <div key={font.id} className="flex items-center gap-3 rounded-2xl border bg-white p-4 shadow-sm"><span className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-lg font-bold text-slate-700">آ</span><div className="min-w-0 flex-1">{editing === font.id ? <input autoFocus dir="ltr" className="w-full rounded-lg border px-2 py-1" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') rename(font.id); }} /> : <p className="truncate font-semibold" dir="ltr">{font.name}</p>}<p className="text-xs text-slate-500">{font.id === 'vazirmatn' ? 'فونت پیش‌فرض سیستم' : 'فونت اختصاصی'}</p></div>{font.id !== 'vazirmatn' && <div className="flex gap-1"><button type="button" className="rounded-lg p-2 text-slate-500 hover:bg-slate-100" title="ویرایش نام" onClick={() => { setEditing(font.id); setName(font.name); }}><Pencil className="h-4 w-4" /></button><button type="button" disabled={busy} className="rounded-lg p-2 text-red-600 hover:bg-red-50" title="حذف فونت" onClick={() => void remove(font.id)}><Trash2 className="h-4 w-4" /></button></div>}</div>)}</div>
-    <p className="text-xs leading-5 text-slate-500">برای ثبت تغییر نام، پس از ویرایش روی Enter بزنید و سپس ذخیره را انتخاب کنید.</p>
+    <div className="grid gap-3 sm:grid-cols-2">{families.map((family) => { const isBuiltin = family.fonts.some((font) => font.id === 'vazirmatn'); const nextVariant = familyVariants[family.name] || 'regular'; return <div key={family.name} className="rounded-2xl border bg-white p-4 shadow-sm"><div className="flex items-start gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-slate-100 text-lg font-bold text-slate-700">آ</span><div className="min-w-0 flex-1"><p className="truncate font-semibold" dir="ltr">{family.name}</p><p className="text-xs text-slate-500">{isBuiltin ? 'فونت پیش‌فرض سیستم' : `${family.fonts.length} Variant`}</p></div></div><div className="mt-3 flex flex-wrap gap-2">{family.fonts.sort((a, b) => (a.weight || 400) - (b.weight || 400)).map((font) => <span key={font.id} className="inline-flex items-center gap-1 rounded-lg bg-slate-100 px-2 py-1 text-xs text-slate-700">{variantLabel(font.variant)}{!isBuiltin && <button type="button" disabled={busy} className="mr-1 text-red-600" aria-label={`حذف ${font.variant}`} onClick={() => void remove(font.id)}>×</button>}</span>)}</div>{!isBuiltin && <div className="mt-3 grid grid-cols-[1fr_auto] gap-2"><select className="rounded-lg border px-2 py-2 text-xs" value={nextVariant} onChange={(e) => setFamilyVariants((current) => ({ ...current, [family.name]: e.target.value }))}>{variants.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><label className="inline-flex cursor-pointer items-center justify-center gap-2 rounded-lg border border-dashed border-blue-300 px-3 py-2 text-xs font-medium text-blue-700 hover:bg-blue-50"><Upload className="h-3.5 w-3.5" /> افزودن فایل<input type="file" accept=".woff2,.woff,.ttf,.otf,font/woff2,font/woff,font/ttf,font/otf" className="hidden" disabled={busy} onChange={(e) => { const file = e.target.files?.[0]; if (file) void upload(file, family.name, nextVariant); e.currentTarget.value = ''; }} /></label></div>}</div>; })}</div>
   </div>;
 }
 
@@ -266,7 +281,7 @@ export default function PublishingSettingsPage() {
     <ProtectedLayout title="تنظیمات نشر هوشمند" ownerOnly>
       <main className="mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6" dir="rtl">
         <header className="flex flex-col gap-4 rounded-3xl bg-gradient-to-l from-slate-950 via-slate-900 to-blue-950 p-6 text-white shadow-xl shadow-slate-900/10 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-start gap-4"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Settings2 className="h-6 w-6" /></span><div><h1 className="text-2xl font-bold">تنظیمات نشر هوشمند</h1><p className="mt-2 text-sm leading-6 text-slate-300">اتصال امن GapGPT، پایش خبرها و انتشار مستقیم در WordPress.</p></div></div>
+          <div className="flex items-start gap-4"><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Settings2 className="h-6 w-6" /></span><div><h1 className="text-2xl font-bold">تنظیمات نشر هوشمند</h1><p className="mt-2 text-sm leading-6 text-slate-300">پیکربندی عمومی بخش نشر.</p></div></div>
         </header>
 
         {error && <div role="alert" className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}

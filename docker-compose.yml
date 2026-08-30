@@ -16,6 +16,20 @@ services:
       timeout: 5s
       retries: 5
 
+  # A named Docker volume is mounted after the image is built, so the chown
+  # performed in the Dockerfile does not apply to a newly created volume.
+  # Prepare it as root once before the non-root API process starts.
+  api-storage-init:
+    image: ${IMAGE_PREFIX:-deskaerp}/api:${APP_VERSION:-latest}
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: "no"
+    user: "0:0"
+    command: ["sh", "-c", "mkdir -p /app/uploads && chown -R 1001:1001 /app/uploads"]
+    volumes:
+      - api_uploads:/app/uploads
+
   api:
     image: ${IMAGE_PREFIX:-deskaerp}/api:${APP_VERSION:-latest}
     build:
@@ -51,6 +65,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      api-storage-init:
+        condition: service_completed_successfully
 
   web:
     image: ${IMAGE_PREFIX:-deskaerp}/web:${APP_VERSION:-latest}

@@ -229,12 +229,43 @@ function normalizeCoverTemplateLibrary(value: string, legacyTemplate: string): s
   return JSON.stringify({ version: 1, defaultTemplateId, templates });
 }
 
-export type FontRecord = { id: string; name: string; url?: string };
+const FONT_VARIANTS = {
+  thin: 100,
+  'extra-light': 200,
+  light: 300,
+  regular: 400,
+  medium: 500,
+  'semi-bold': 600,
+  bold: 700,
+  'extra-bold': 800,
+  black: 900,
+} as const;
+
+type FontVariant = keyof typeof FONT_VARIANTS;
+export type FontRecord = { id: string; name: string; variant: FontVariant; weight: number; url?: string };
+
+function normalizeFontVariant(value?: string): FontVariant {
+  const normalized = String(value || 'regular').trim().toLowerCase().replace(/[ _]+/gu, '-');
+  const aliases: Record<string, FontVariant> = {
+    normal: 'regular',
+    book: 'regular',
+    semibold: 'semi-bold',
+    demibold: 'semi-bold',
+    extralight: 'extra-light',
+    ultralight: 'extra-light',
+    extrabold: 'extra-bold',
+    ultrabold: 'extra-bold',
+    heavy: 'black',
+  };
+  const variant = aliases[normalized] || normalized;
+  if (!(variant in FONT_VARIANTS)) throw new BadRequestException('Variant فونت معتبر نیست');
+  return variant as FontVariant;
+}
 
 function normalizeFontLibrary(value: string): string {
   try {
     const fonts = JSON.parse(value) as unknown;
-    if (!Array.isArray(fonts) || fonts.length > 40) throw new Error();
+    if (!Array.isArray(fonts) || fonts.length > 200) throw new Error();
     const normalized: FontRecord[] = [];
     for (const item of fonts) {
       const raw = typeof item === 'string' ? { id: `legacy-${item}`, name: item } : item as Record<string, unknown>;
@@ -244,13 +275,17 @@ function normalizeFontLibrary(value: string): string {
       const rawUrl = raw?.url ? String(raw.url).trim() : '';
       const url = rawUrl.startsWith('/publishing/settings/fonts/file/') && !rawUrl.includes('..') ? rawUrl : (rawUrl ? normalizeHttpUrl(rawUrl, 'آدرس فونت') : undefined);
       if (name.toLowerCase() === 'vazirmatn' || id === 'vazirmatn') continue;
-      if (!normalized.some((font) => font.name.toLowerCase() === name.toLowerCase())) normalized.push({ id, name, ...(url ? { url } : {}) });
+      const variant = normalizeFontVariant(typeof raw?.variant === 'string' ? raw.variant : 'regular');
+      const weight = FONT_VARIANTS[variant];
+      if (!normalized.some((font) => font.name.toLowerCase() === name.toLowerCase() && font.variant === variant)) {
+        normalized.push({ id, name, variant, weight, ...(url ? { url } : {}) });
+      }
     }
-    return JSON.stringify([{ id: 'vazirmatn', name: 'Vazirmatn' }, ...normalized]);
+    return JSON.stringify([{ id: 'vazirmatn', name: 'Vazirmatn', variant: 'regular', weight: 400 }, ...normalized]);
   } catch {
     // A malformed legacy value must never block saving unrelated tabs. Reset it
     // to the safe built-in font; custom fonts can be added again from the UI.
-    return JSON.stringify([{ id: 'vazirmatn', name: 'Vazirmatn' }]);
+    return JSON.stringify([{ id: 'vazirmatn', name: 'Vazirmatn', variant: 'regular', weight: 400 }]);
   }
 }
 
@@ -271,23 +306,27 @@ export class PublishingSettingsService {
 
   private storagePath() { return process.env.STORAGE_PATH || path.resolve(process.cwd(), 'uploads'); }
 
-  async addFont(tenantId: string, file: { originalname: string; buffer: Buffer }, requestedName?: string): Promise<FontRecord> {
+  async addFont(tenantId: string, file: { originalname: string; buffer: Buffer }, requestedName?: string, requestedVariant?: string): Promise<FontRecord> {
     if (!file) throw new BadRequestException('فایل فونت انتخاب نشده است');
     const ext = path.extname(file.originalname).toLowerCase();
     if (!['.woff2', '.woff', '.ttf', '.otf'].includes(ext)) throw new BadRequestException('فرمت فونت باید woff2، woff، ttf یا otf باشد');
     if (!file.buffer?.length || file.buffer.length > 10 * 1024 * 1024) throw new BadRequestException('حجم فونت حداکثر ۱۰ مگابایت است');
     const name = (requestedName || path.basename(file.originalname, ext)).trim();
     if (!/^[\w\u0600-\u06ff -]{1,80}$/u.test(name) || name.toLowerCase() === 'vazirmatn') throw new BadRequestException('نام فونت معتبر نیست');
+    const variant = normalizeFontVariant(requestedVariant);
     const id = randomUUID();
     const filename = `${id}${ext}`;
     const dir = this.tenantAssetDirectory('fonts', tenantId);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, filename), file.buffer);
+    await this.writeTenantAsset(dir, filename, file.buffer, 'فونت');
     const current = await this.getRaw(tenantId);
     const library = JSON.parse(normalizeFontLibrary(current.social_font_library || DEFAULTS.social_font_library!)) as FontRecord[];
-    const record: FontRecord = { id, name, url: `/publishing/settings/fonts/file/${tenantId}/${filename}` };
-    const next = [...library.filter((font) => font.name.toLowerCase() !== name.toLowerCase()), record];
+    const record: FontRecord = { id, name, variant, weight: FONT_VARIANTS[variant], url: `/publishing/settings/fonts/file/${tenantId}/${filename}` };
+    const replaced = library.find((font) => font.name.toLowerCase() === name.toLowerCase() && font.variant === variant);
+    const next = [...library.filter((font) => font.name.toLowerCase() !== name.toLowerCase() || font.variant !== variant), record];
     await this.save(tenantId, { social_font_library: JSON.stringify(next) });
+    if (replaced?.url?.startsWith(`/publishing/settings/fonts/file/${tenantId}/`)) {
+      await fs.rm(path.join(dir, path.basename(replaced.url)), { force: true }).catch(() => undefined);
+    }
     return record;
   }
 
@@ -304,7 +343,7 @@ export class PublishingSettingsService {
       // metadata. Keep them readable rather than risking deletion of a file
       // referenced by another organization.
       if (found.url.startsWith(tenantPrefix)) {
-        await fs.rm(path.join(this.tenantAssetDirectory('fonts', tenantId), path.basename(found.url)), { force: true });
+        await fs.rm(path.join(this.tenantAssetDirectory('fonts', tenantId), path.basename(found.url)), { force: true }).catch(() => undefined);
       }
     }
   }
@@ -331,8 +370,7 @@ export class PublishingSettingsService {
     if (!file.buffer?.length || file.buffer.length > 15 * 1024 * 1024) throw new BadRequestException('حجم تصویر حداکثر ۱۵ مگابایت است');
     const filename = `${randomUUID()}${ext}`;
     const dir = this.tenantAssetDirectory('cover-images', tenantId);
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(path.join(dir, filename), file.buffer);
+    await this.writeTenantAsset(dir, filename, file.buffer, 'تصویر');
     return { url: `/publishing/settings/images/file/${tenantId}/${filename}` };
   }
 
@@ -353,6 +391,19 @@ export class PublishingSettingsService {
   private tenantAssetDirectory(kind: 'fonts' | 'cover-images', tenantId: string): string {
     if (!/^[a-zA-Z0-9_-]{10,64}$/u.test(tenantId)) throw new NotFoundException();
     return path.join(this.storagePath(), kind, tenantId);
+  }
+
+  private async writeTenantAsset(directory: string, filename: string, buffer: Buffer, label: 'فونت' | 'تصویر'): Promise<void> {
+    try {
+      await fs.mkdir(directory, { recursive: true });
+      await fs.writeFile(path.join(directory, filename), buffer);
+    } catch (error) {
+      const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+      if (['EACCES', 'EPERM', 'EROFS', 'ENOSPC'].includes(code)) {
+        throw new BadRequestException(`ذخیره‌سازی ${label} در سرور ممکن نیست. دسترسی و فضای STORAGE_PATH را بررسی کنید.`);
+      }
+      throw new BadRequestException(`آپلود ${label} در سرور انجام نشد. دوباره تلاش کنید.`);
+    }
   }
 
   private assertAssetPath(tenantId: string, filename: string, extension: RegExp): void {

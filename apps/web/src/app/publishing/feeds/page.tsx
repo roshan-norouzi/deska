@@ -150,7 +150,7 @@ export default function FeedsPage() {
             <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 ring-1 ring-white/15"><Rss className="h-6 w-6" /></span>
             <div>
               <h1 className="text-2xl font-bold">مدیریت فیدها</h1>
-              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">منابع RSS را یک‌بار ثبت کنید و مشخص کنید محتوای هر منبع در کدام بخش استفاده شود.</p>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">ثبت و مدیریت منابع محتوایی.</p>
             </div>
           </div>
           <Button className="shrink-0 bg-white text-slate-900 hover:bg-slate-100 focus:ring-white" onClick={openCreate}>
