@@ -250,7 +250,7 @@ export class SourceReaderService {
     try {
       const html = await this.safeFetchText(articleUrl, MAX_ARTICLE_BYTES, ['text/html', 'application/xhtml+xml']);
       const $ = load(html);
-      const selector = '[itemprop="author"] img, [rel="author"] img, .author img, .author-avatar img, .avatar img, [class*="author"] img, [class*="avatar"] img, img[alt*="author" i], img[alt*="نویسنده"]';
+      const selector = '[itemprop="author"] img, [rel="author"] img, a[href*="/author/"] img, .author img, .author-avatar img, .avatar img, [class*="author"] img, [class*="avatar"] img, img[alt*="author" i], img[alt*="نویسنده"]';
       const srcset = $(selector).map((_, node) => bestSrcset($(node).attr('srcset') || $(node).attr('data-srcset') || '')).get().find(Boolean);
       const candidate = srcset
         || $('meta[property="article:author:image"]').attr('content')
@@ -312,7 +312,7 @@ export class SourceReaderService {
       || metadata$('[itemprop="articleSection"]').first().text()).replace(/\s+/g, ' ').trim();
     const shortUrl = normalizeUrl(metadata$('link[rel="shortlink"]').attr('href') || '', articleUrl);
     const authorMetadata$ = metadata$;
-    const authorImageSelector = '[itemprop="author"] img, [rel="author"] img, .author img, .author-avatar img, .avatar img, [class*="author"] img, [class*="avatar"] img, img[alt*="author" i], img[alt*="نویسنده"]';
+    const authorImageSelector = '[itemprop="author"] img, [rel="author"] img, a[href*="/author/"] img, .author img, .author-avatar img, .avatar img, [class*="author"] img, [class*="avatar"] img, img[alt*="author" i], img[alt*="نویسنده"]';
     const authorSrcsetImage = authorMetadata$(authorImageSelector).map((_, node) => bestSrcset(authorMetadata$(node).attr('srcset') || authorMetadata$(node).attr('data-srcset') || '')).get().find(Boolean);
     const authorImageCandidate = authorSrcsetImage
       || $('meta[property="article:author:image"]').attr('content')

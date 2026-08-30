@@ -95,6 +95,10 @@ export class SocialStudioService {
           status: 'pending',
         })),
       }) : { count: 0 };
+      await Promise.all(enrichedEntries.filter((entry) => entry.authorImageUrl).map((entry) => this.prisma.socialArticle.updateMany({
+        where: { tenantId, link: entry.canonicalUrl, OR: [{ authorImageUrl: null }, { authorImageUrl: '' }] },
+        data: { authorImageUrl: entry.authorImageUrl },
+      })));
       await this.prisma.newsFeed.update({ where: { id: feed.id }, data: { lastFetchedAt: new Date(), lastError: '' } });
       return { ok: true, discovered: enrichedEntries.length, created: result.count };
     } catch (error) {
