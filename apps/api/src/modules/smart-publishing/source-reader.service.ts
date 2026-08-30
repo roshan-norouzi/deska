@@ -246,6 +246,24 @@ export class SourceReaderService {
     }).filter((entry) => entry.canonicalUrl && entry.title);
   }
 
+  async readAuthorImage(articleUrl: string): Promise<string> {
+    try {
+      const html = await this.safeFetchText(articleUrl, MAX_ARTICLE_BYTES, ['text/html', 'application/xhtml+xml']);
+      const $ = load(html);
+      const selector = '[itemprop="author"] img, [rel="author"] img, .author img, .author-avatar img, .avatar img, [class*="author"] img, [class*="avatar"] img, img[alt*="author" i], img[alt*="نویسنده"]';
+      const srcset = $(selector).map((_, node) => bestSrcset($(node).attr('srcset') || $(node).attr('data-srcset') || '')).get().find(Boolean);
+      const candidate = srcset
+        || $('meta[property="article:author:image"]').attr('content')
+        || $('meta[name="author:image"]').attr('content')
+        || $('meta[property="profile:image"], meta[name="profile:image"]').attr('content')
+        || $(selector).map((_, node) => $(node).attr('src') || $(node).attr('data-src') || '').get().find(Boolean)
+        || '';
+      return normalizeUrl(candidate, articleUrl);
+    } catch {
+      return '';
+    }
+  }
+
   async readArticle(articleUrl: string): Promise<SourceArticle> {
     const html = await this.safeFetchText(articleUrl, MAX_ARTICLE_BYTES, ['text/html', 'application/xhtml+xml']);
     // Keep an untouched DOM for metadata and title-block extraction. The

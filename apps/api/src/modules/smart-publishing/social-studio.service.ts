@@ -75,9 +75,13 @@ export class SocialStudioService {
       const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
       const entries = (await this.sourceReader.readFeed(feed.url))
         .filter((entry) => !entry.publishedAt || entry.publishedAt >= cutoff);
-      const result = entries.length ? await this.prisma.socialArticle.createMany({
+      const enrichedEntries = await Promise.all(entries.map(async (entry) => ({
+        ...entry,
+        authorImageUrl: entry.authorImageUrl || await this.sourceReader.readAuthorImage(entry.canonicalUrl),
+      })));
+      const result = enrichedEntries.length ? await this.prisma.socialArticle.createMany({
         skipDuplicates: true,
-        data: entries.map((entry) => ({
+        data: enrichedEntries.map((entry) => ({
           tenantId,
           feedId: feed.id,
           title: entry.title,
@@ -92,7 +96,7 @@ export class SocialStudioService {
         })),
       }) : { count: 0 };
       await this.prisma.newsFeed.update({ where: { id: feed.id }, data: { lastFetchedAt: new Date(), lastError: '' } });
-      return { ok: true, discovered: entries.length, created: result.count };
+      return { ok: true, discovered: enrichedEntries.length, created: result.count };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'خطای دریافت فید اجتماعی';
       await this.prisma.newsFeed.update({ where: { id: feed.id }, data: { lastFetchedAt: new Date(), lastError: message.slice(0, 1000) } });
