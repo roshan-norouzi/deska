@@ -171,6 +171,33 @@ export class GapGptClient {
     return { lead: lead.slice(0, 1200), summary: summary.slice(0, 5000) };
   }
 
+  async prepareNewsForSocial(
+    settings: PublishingSettings,
+    input: { sourceName: string; title: string; text: string },
+  ): Promise<{ title: string; lead: string; summary: string }> {
+    const raw = await this.complete(settings,
+      'به‌عنوان دبیر شبکه‌های اجتماعی، یک نسخه فارسی کوتاه، دقیق و بی‌طرف از خبر آماده کن. خروجی در درجه اول برای تلگرام است. مهم‌ترین اتفاق را در ابتدای متن بیاور، نام‌ها و اعداد را دقیق نگه دار و هیچ اطلاعات، تحلیل، هشتگ یا ادعای تازه‌ای اضافه نکن.',
+      [
+        `منبع: ${input.sourceName || 'نامشخص'}`,
+        `تیتر خبر: ${input.title}`,
+        `متن یا خلاصه خبر:\n${input.text.slice(0, 20_000)}`,
+        'فقط JSON معتبر با ساختار {"title":"تیتر فارسی روشن و کوتاه","lead":"یک جمله کوتاه درباره مهم‌ترین اتفاق","summary":"خلاصه مفید و فشرده در ۲ تا ۴ جمله"} برگردان.',
+      ].join('\n\n'),
+      1200,
+      'social',
+    );
+    const parsed = extractJson(raw);
+    const title = String(parsed?.title ?? '').replace(/\s+/gu, ' ').trim();
+    const lead = normalizeSocialLead(String(parsed?.lead ?? ''));
+    const summary = String(parsed?.summary ?? '').trim();
+    if (!title || !lead || !summary) throw new Error('پاسخ GapGPT قالب معتبر خبر اجتماعی را نداشت');
+    return {
+      title: title.slice(0, 300),
+      lead: lead.slice(0, 600),
+      summary: summary.slice(0, 1800),
+    };
+  }
+
   async prepareDailyReport(
     settings: PublishingSettings,
     input: { sourceName: string; title: string; text: string },

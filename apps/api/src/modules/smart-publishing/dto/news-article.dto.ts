@@ -9,6 +9,9 @@ export const NEWS_STATUSES = [
   'published',
   'failed',
   'publish_failed',
+  'social_processing',
+  'social_sent',
+  'social_failed',
 ] as const;
 
 export type NewsStatus = (typeof NEWS_STATUSES)[number];

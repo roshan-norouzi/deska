@@ -77,6 +77,7 @@ export class SmartPublishingController {
   @Delete('news/articles') @RequirePermission('publishing.manage') deleteAllNewsArticles(@TenantCtx() tenant: TenantContext) { return this.newsroom.deleteAllArticles(tenant.tenantId); }
   @Post('news/articles/:id/summarize') @RequirePermission('publishing.manage') summarize(@TenantCtx() tenant: TenantContext, @Param('id') id: string) { return this.newsroom.summarize(tenant.tenantId, id); }
   @Post('news/articles/:id/reject') @RequirePermission('publishing.manage') reject(@TenantCtx() tenant: TenantContext, @Param('id') id: string) { return this.newsroom.reject(tenant.tenantId, id); }
+  @Post('news/articles/:id/send-to-social') @RequirePermission('publishing.manage') sendNewsToSocial(@TenantCtx() tenant: TenantContext, @Param('id') id: string) { return this.socialStudio.sendNewsToStudio(tenant.tenantId, id); }
   @Post('news/articles/:id/publish') @RequirePermission('publishing.publish') publishNews(@TenantCtx() tenant: TenantContext, @Param('id') id: string) { return this.newsroom.publish(tenant.tenantId, id); }
   @Patch('news/articles/:id') @RequirePermission('publishing.manage') updateNews(@TenantCtx() tenant: TenantContext, @Param('id') id: string, @Body() body: UpdateNewsArticleDto) { return this.newsroom.updateArticle(tenant.tenantId, id, body); }
 

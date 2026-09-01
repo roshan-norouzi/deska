@@ -125,6 +125,123 @@ export class SocialStudioService {
     return { ok: failed.length === 0, feeds: results, queued };
   }
 
+  async sendNewsToStudio(tenantId: string, newsArticleId: string) {
+    const news = await this.prisma.newsArticle.findFirst({
+      where: { id: newsArticleId, tenantId, feed: { purpose: 'news-room' } },
+      include: { feed: { select: { id: true, name: true } } },
+    });
+    if (!news) throw new NotFoundException('خبر یافت نشد');
+
+    const link = news.originalUrl || news.canonicalUrl;
+    const existing = await this.prisma.socialArticle.findUnique({
+      where: { tenantId_link: { tenantId, link } },
+    });
+    if (news.status === 'social_sent' && existing) {
+      return { ok: true, alreadySent: true, article: existing };
+    }
+    if (!['ready', 'publish_failed', 'social_failed', 'social_sent'].includes(news.status)) {
+      throw new BadRequestException('ابتدا ترجمه و خلاصه خبر را آماده کنید');
+    }
+    if (existing?.status === 'processing') {
+      throw new BadRequestException('این خبر هم‌اکنون در استودیوی اجتماعی در حال آماده‌سازی است');
+    }
+
+    const claimed = await this.prisma.newsArticle.updateMany({
+      where: {
+        id: news.id,
+        tenantId,
+        status: { in: ['ready', 'publish_failed', 'social_failed', 'social_sent'] },
+      },
+      data: { status: 'social_processing', processingStartedAt: new Date(), lastError: '' },
+    });
+    if (!claimed.count) throw new BadRequestException('این خبر هم‌اکنون در حال پردازش است');
+
+    try {
+      const [settings, source] = await Promise.all([
+        this.settings.getRaw(tenantId),
+        this.sourceReader.readArticle(link).catch(() => null),
+      ]);
+      const sourceName = news.sourceName || news.feed?.name || '';
+      const text = news.summaryFa || news.originalSummary || news.originalContent || news.originalTitle;
+      const prepared = await this.gapGpt.prepareNewsForSocial(settings, {
+        sourceName,
+        title: news.titleFa || news.originalTitle,
+        text,
+      });
+      const author = source?.author || sourceName || 'نامشخص';
+      const category = source?.category || 'خبر';
+      const shortUrl = source?.shortUrl || source?.canonicalUrl || link;
+      const readingTime = readingMinutes(source?.text || text);
+      const values = {
+        title: prepared.title,
+        lead: prepared.lead,
+        author,
+        category,
+        reading_time: persianDigits(readingTime),
+        summary: prepared.summary,
+        link: shortUrl,
+        source: sourceName,
+      };
+      const captionTemplate = String(settings.social_caption_template || '{title}\n\n{lead}\n\n{summary}\n\n{link}');
+      const captionText = renderTemplate(captionTemplate, values);
+      const article = await this.prisma.socialArticle.upsert({
+        where: { tenantId_link: { tenantId, link } },
+        create: {
+          tenantId,
+          feedId: news.feedId,
+          title: prepared.title,
+          link,
+          author,
+          category,
+          publishedAt: news.publishedAtSource,
+          featuredImageUrl: source?.featuredImageUrl || news.featuredImageUrl || null,
+          authorImageUrl: likelyImageUrl(source?.authorImageUrl),
+          originalText: text,
+          leadText: prepared.lead,
+          summaryText: prepared.summary,
+          rewrittenText: captionText,
+          shortUrl,
+          captionText,
+          readingTime,
+          status: 'ready',
+          processingStartedAt: null,
+          lastError: '',
+        },
+        update: {
+          feedId: news.feedId,
+          title: prepared.title,
+          author,
+          category,
+          publishedAt: news.publishedAtSource,
+          featuredImageUrl: source?.featuredImageUrl || news.featuredImageUrl || existing?.featuredImageUrl || null,
+          authorImageUrl: likelyImageUrl(source?.authorImageUrl) || likelyImageUrl(existing?.authorImageUrl),
+          originalText: text,
+          leadText: prepared.lead,
+          summaryText: prepared.summary,
+          rewrittenText: captionText,
+          shortUrl,
+          captionText,
+          readingTime,
+          status: 'ready',
+          processingStartedAt: null,
+          lastError: '',
+        },
+      });
+      await this.prisma.newsArticle.updateMany({
+        where: { id: news.id, tenantId, status: 'social_processing' },
+        data: { status: 'social_sent', processingStartedAt: null, lastError: '' },
+      });
+      return { ok: true, alreadySent: false, article };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'خطای آماده‌سازی خبر برای شبکه‌های اجتماعی';
+      await this.prisma.newsArticle.updateMany({
+        where: { id: news.id, tenantId, status: 'social_processing' },
+        data: { status: 'social_failed', processingStartedAt: null, lastError: message.slice(0, 1000) },
+      });
+      throw new BadRequestException(`ارسال به استودیوی اجتماعی انجام نشد: ${message}`);
+    }
+  }
+
   async prepare(tenantId: string, id: string) {
     const article = await this.prisma.socialArticle.findFirst({ where: { id, tenantId } });
     if (!article) throw new NotFoundException('مطلب اجتماعی یافت نشد');

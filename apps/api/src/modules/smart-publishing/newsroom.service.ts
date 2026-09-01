@@ -2,7 +2,7 @@ import { BadRequestException, ConflictException, Injectable, Logger, NotFoundExc
 import { Interval } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service';
 import { FEED_PURPOSES, type CreateFeedDto, type FeedPurpose, type UpdateFeedDto } from './dto/feed.dto';
-import type { UpdateNewsArticleDto } from './dto/news-article.dto';
+import { NEWS_STATUSES, type UpdateNewsArticleDto } from './dto/news-article.dto';
 import { GapGptClient } from './gapgpt.client';
 import { PublishingSettingsService } from './publishing-settings.service';
 import { SourceReaderService } from './source-reader.service';
@@ -112,7 +112,7 @@ export class NewsroomService {
 
   async articles(tenantId: string, status?: string) {
     await this.purgeRejected();
-    if (status && !['new', 'processing', 'ready', 'rejected', 'publishing', 'published', 'failed', 'publish_failed'].includes(status)) {
+    if (status && !NEWS_STATUSES.includes(status as (typeof NEWS_STATUSES)[number])) {
       throw new BadRequestException('وضعیت خبر معتبر نیست');
     }
     return this.prisma.newsArticle.findMany({
@@ -130,7 +130,7 @@ export class NewsroomService {
 
   async updateArticle(tenantId: string, id: string, data: UpdateNewsArticleDto) {
     const article = await this.findArticle(tenantId, id);
-    if (['rejected', 'publishing', 'published'].includes(article.status)) {
+    if (['rejected', 'publishing', 'published', 'social_processing', 'social_sent'].includes(article.status)) {
       throw new BadRequestException('ویرایش خبر در وضعیت فعلی مجاز نیست');
     }
     const titleFa = data.titleFa !== undefined ? data.titleFa.trim() : article.titleFa;
@@ -238,7 +238,7 @@ export class NewsroomService {
 
   async reject(tenantId: string, id: string) {
     const article = await this.findArticle(tenantId, id);
-    if (['published', 'rejected'].includes(article.status)) throw new BadRequestException('این خبر قبلاً تعیین تکلیف شده است');
+    if (['published', 'rejected', 'social_processing', 'social_sent'].includes(article.status)) throw new BadRequestException('این خبر قبلاً تعیین تکلیف شده است');
     const rejectedAt = new Date();
     const purgeAfter = new Date(rejectedAt.getTime() + REJECT_RETENTION_MS);
     return this.prisma.newsArticle.update({
@@ -326,6 +326,7 @@ export class NewsroomService {
       const staleBefore = new Date(Date.now() - PROCESSING_TIMEOUT_MS);
       await this.prisma.newsArticle.updateMany({ where: { tenantId: { in: enabledTenantIds }, status: 'processing', processingStartedAt: { lte: staleBefore } }, data: { status: 'new', processingStartedAt: null } });
       await this.prisma.newsArticle.updateMany({ where: { tenantId: { in: enabledTenantIds }, status: 'publishing', processingStartedAt: { lte: staleBefore } }, data: { status: 'publish_failed', processingStartedAt: null, lastError: 'عملیات انتشار قبلی ناتمام مانده بود؛ دوباره تلاش کنید' } });
+      await this.prisma.newsArticle.updateMany({ where: { tenantId: { in: enabledTenantIds }, status: 'social_processing', processingStartedAt: { lte: staleBefore } }, data: { status: 'social_failed', processingStartedAt: null, lastError: 'ارسال قبلی به استودیوی اجتماعی ناتمام ماند؛ دوباره تلاش کنید' } });
       await this.prisma.newsArticle.deleteMany({ where: { tenantId: { in: enabledTenantIds }, status: 'rejected', purgeAfter: { lte: new Date() } } });
 
       const feeds = await this.prisma.newsFeed.findMany({ where: { tenantId: { in: enabledTenantIds }, purpose: 'news-room', enabled: true }, orderBy: { lastFetchedAt: 'asc' } });

@@ -9,6 +9,7 @@ const { TenantService } = require('../dist/platform/tenant/tenant.service');
 const { PlatformAdminService } = require('../dist/platform/admin/platform-admin.service');
 const { CalendarService } = require('../dist/modules/calendar/calendar.service');
 const { PublishingSettingsService } = require('../dist/modules/smart-publishing/publishing-settings.service');
+const { SocialStudioService } = require('../dist/modules/smart-publishing/social-studio.service');
 const { AuthService } = require('../dist/platform/auth/auth.service');
 const { JwtStrategy } = require('../dist/common/strategies/jwt.strategy');
 const { NotificationService } = require('../dist/common/services/audit.service');
@@ -251,6 +252,70 @@ test('legacy GapGPT credentials remain usable when the module row has an empty p
 
   assert.equal(settings.gapgpt_base_url, 'https://legacy-gap.example');
   assert.equal(settings.gapgpt_api_key, 'legacy-gap-secret');
+});
+
+test('a prepared newsroom article is converted directly into ready social content', async () => {
+  const newsStatuses = [];
+  let socialUpsert;
+  const prisma = {
+    newsArticle: {
+      findFirst: async () => ({
+        id: 'news-a',
+        tenantId: 'tenant-a',
+        feedId: 'feed-a',
+        canonicalUrl: 'https://news.example/story',
+        originalUrl: 'https://news.example/story',
+        originalTitle: 'Original title',
+        originalSummary: 'Original summary',
+        originalContent: '',
+        titleFa: 'تیتر فارسی خبر',
+        summaryFa: 'خلاصه فارسی خبر',
+        sourceName: 'رسانه نمونه',
+        publishedAtSource: new Date('2026-09-01T08:00:00Z'),
+        featuredImageUrl: 'https://news.example/image.jpg',
+        status: 'ready',
+        feed: { id: 'feed-a', name: 'رسانه نمونه' },
+      }),
+      updateMany: async ({ data }) => {
+        newsStatuses.push(data.status);
+        return { count: 1 };
+      },
+    },
+    socialArticle: {
+      findUnique: async () => null,
+      upsert: async (query) => {
+        socialUpsert = query;
+        return { id: 'social-a', ...query.create };
+      },
+    },
+  };
+  const settings = { getRaw: async () => ({ social_caption_template: '{title}\n\n{lead}\n\n{summary}\n\n{link}' }) };
+  const gapGpt = {
+    prepareNewsForSocial: async (_settings, input) => {
+      assert.equal(input.title, 'تیتر فارسی خبر');
+      assert.equal(input.text, 'خلاصه فارسی خبر');
+      return { title: 'تیتر کوتاه', lead: 'اصل اتفاق در یک جمله.', summary: 'خلاصه مفید و کوتاه خبر.' };
+    },
+  };
+  const sourceReader = {
+    readArticle: async () => ({
+      canonicalUrl: 'https://news.example/story',
+      shortUrl: 'https://news.example/s/1',
+      text: 'Full source text',
+      featuredImageUrl: 'https://news.example/image.jpg',
+      authorImageUrl: '',
+      author: 'نویسنده',
+      category: 'جهان',
+    }),
+  };
+  const service = new SocialStudioService(prisma, settings, gapGpt, sourceReader);
+
+  const result = await service.sendNewsToStudio('tenant-a', 'news-a');
+
+  assert.equal(result.article.status, 'ready');
+  assert.equal(socialUpsert.create.title, 'تیتر کوتاه');
+  assert.equal(socialUpsert.create.captionText, 'تیتر کوتاه\n\nاصل اتفاق در یک جمله.\n\nخلاصه مفید و کوتاه خبر.\n\nhttps://news.example/s/1');
+  assert.deepEqual(newsStatuses, ['social_processing', 'social_sent']);
 });
 
 test('saving a new integration host removes an omitted stored secret', async () => {

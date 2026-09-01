@@ -20,34 +20,80 @@ if (Test-Path $configPath) {
   if ($config.repository) { $repository = [string]$config.repository }
 }
 
-if (-not $SkipSystemExport -and (Get-Command docker -ErrorAction SilentlyContinue)) {
+function Test-SystemObservanceSnapshot([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
+  try {
+    $snapshot = @(Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json)
+    return $snapshot.Count -gt 0
+  } catch {
+    return $false
+  }
+}
+
+function Invoke-SystemObservanceExport([string]$ScriptPath) {
+  # Windows PowerShell turns native stderr into terminating ErrorRecord objects
+  # when ErrorActionPreference is Stop. Capture the process result explicitly so
+  # Prisma diagnostics can be classified before the deployment is interrupted.
+  $previousPreference = $ErrorActionPreference
+  try {
+    $ErrorActionPreference = 'Continue'
+    $output = @(& node $ScriptPath --base64 2>&1)
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousPreference
+  }
+  return [PSCustomObject]@{ Output = $output; ExitCode = $exitCode }
+}
+
+if (-not $SkipSystemExport) {
   Write-Host 'Exporting local system observances...' -ForegroundColor Cyan
   $prismaPath = Join-Path $projectRoot 'apps/api/prisma'
+  $exportScriptPath = Join-Path $prismaPath 'export-system-observances.cjs'
+  $snapshotPath = Join-Path $prismaPath 'system-observances.json'
   try {
-    $exported = @(node (Join-Path $prismaPath 'export-system-observances.cjs') --base64 2>&1)
-    $exportExitCode = $LASTEXITCODE
-    if ($exportExitCode -ne 0) {
-      $diagnostic = ($exported | Out-String)
-      $requiresLocalEngine = $diagnostic -match 'P6001|prisma\+postgres|prisma://'
-      if (-not $requiresLocalEngine) { throw 'Unable to export system observances. Verify the local PostgreSQL service and applied migrations.' }
-
-      if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
-        throw 'The local Prisma Client needs repair, but pnpm is not available.'
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+      if (Test-SystemObservanceSnapshot $snapshotPath) {
+        Write-Warning 'Node.js is unavailable; using the existing system-observances.json snapshot.'
+      } else {
+        throw 'Node.js is unavailable and no valid system-observances.json snapshot exists.'
       }
-      Write-Host 'Repairing Prisma Client for the local PostgreSQL database...' -ForegroundColor Cyan
-      & pnpm --filter @deska/api exec prisma generate
-      if ($LASTEXITCODE -ne 0) {
-        throw 'The local Prisma Client needs repair but its engine file is locked. Stop the local API and web development processes once, then retry.'
+    } else {
+      $exportResult = Invoke-SystemObservanceExport $exportScriptPath
+      $diagnostic = ($exportResult.Output | Out-String)
+      if ($exportResult.ExitCode -ne 0) {
+        $requiresLocalEngine = $diagnostic -match 'P6001|prisma\+postgres|prisma://'
+        if ($requiresLocalEngine) {
+          if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
+            throw 'The local Prisma Client needs repair, but pnpm is not available.'
+          }
+          Write-Host 'Repairing Prisma Client for the local PostgreSQL database...' -ForegroundColor Cyan
+          & pnpm --filter @deska/api exec prisma generate
+          if ($LASTEXITCODE -ne 0) {
+            throw 'The local Prisma Client needs repair but its engine file is locked. Stop the local API and web development processes once, then retry.'
+          }
+          $exportResult = Invoke-SystemObservanceExport $exportScriptPath
+          $diagnostic = ($exportResult.Output | Out-String)
+        }
       }
 
-      $exported = @(node (Join-Path $prismaPath 'export-system-observances.cjs') --base64 2>&1)
-      if ($LASTEXITCODE -ne 0) { throw 'Unable to export system observances after repairing Prisma Client.' }
+      if ($exportResult.ExitCode -eq 0) {
+        $encoded = ($exportResult.Output -join '').Trim()
+        try { $bytes = [Convert]::FromBase64String($encoded); $json = [Text.Encoding]::UTF8.GetString($bytes) } catch { throw 'Export did not return valid UTF-8 data.' }
+        if (-not $json.Trim().StartsWith('[')) { throw 'Export did not return valid JSON.' }
+        [IO.File]::WriteAllBytes($snapshotPath, $bytes)
+        Write-Host 'System observances exported.' -ForegroundColor Green
+      } else {
+        $databaseUnavailable = $diagnostic -match 'P1001|Can''t reach database server|ECONNREFUSED|connection refused'
+        if ($databaseUnavailable -and (Test-SystemObservanceSnapshot $snapshotPath)) {
+          $snapshotDate = (Get-Item -LiteralPath $snapshotPath).LastWriteTime.ToString('yyyy-MM-dd HH:mm')
+          Write-Warning "Local PostgreSQL is unavailable; using the existing system-observances.json snapshot from $snapshotDate."
+        } elseif ($databaseUnavailable) {
+          throw 'Local PostgreSQL is unavailable and no valid system-observances.json snapshot exists. Start DESKA once, then retry deployment.'
+        } else {
+          throw 'Unable to export system observances. Run the export script directly to inspect the Prisma diagnostic.'
+        }
+      }
     }
-    $encoded = ($exported -join '').Trim()
-    try { $bytes = [Convert]::FromBase64String($encoded); $json = [Text.Encoding]::UTF8.GetString($bytes) } catch { throw 'Export did not return valid UTF-8 data.' }
-    if (-not $json.Trim().StartsWith('[')) { throw 'Export did not return valid JSON.' }
-    [IO.File]::WriteAllBytes((Join-Path $prismaPath 'system-observances.json'), $bytes)
-    Write-Host 'System observances exported.' -ForegroundColor Green
   } catch {
     throw "System observance export failed: $($_.Exception.Message)"
   }

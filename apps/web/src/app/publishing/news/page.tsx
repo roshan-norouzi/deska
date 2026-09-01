@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { AlertCircle, CheckCircle2, Clock3, ExternalLink, Newspaper, RefreshCw, Rss, Search, Send, Settings2, Trash2 } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, ExternalLink, Newspaper, RefreshCw, Rss, Search, Send, Settings2, Share2, Trash2 } from 'lucide-react';
 import { ProtectedLayout } from '@/components/layout/protected-layout';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -11,7 +11,7 @@ import { useApi } from '@/hooks/use-api';
 import { ApiError, apiFetch, cn } from '@/lib/utils';
 import { formatPersianDigits } from '@deska/shared';
 
-type NewsStatus = 'new' | 'processing' | 'ready' | 'rejected' | 'publishing' | 'published' | 'failed' | 'publish_failed';
+type NewsStatus = 'new' | 'processing' | 'ready' | 'rejected' | 'publishing' | 'published' | 'failed' | 'publish_failed' | 'social_processing' | 'social_sent' | 'social_failed';
 
 interface Feed { id: string; name: string; purpose: string; enabled: boolean }
 interface Article {
@@ -42,6 +42,9 @@ const STATUS: Record<NewsStatus, { label: string; badge: BadgeProps['variant'] }
   published: { label: 'منتشر شده', badge: 'success' },
   failed: { label: 'خطای آماده‌سازی', badge: 'danger' },
   publish_failed: { label: 'خطای انتشار', badge: 'danger' },
+  social_processing: { label: 'در حال ارسال به استودیو', badge: 'info' },
+  social_sent: { label: 'ارسال‌شده به استودیوی اجتماعی', badge: 'success' },
+  social_failed: { label: 'خطای ارسال به استودیو', badge: 'danger' },
 };
 
 type Filter = 'active' | 'queued' | NewsStatus | 'all';
@@ -66,7 +69,7 @@ export default function NewsPage() {
   const articles = useMemo(() => Array.isArray(articleData) ? articleData : [], [articleData]);
   const rows = useMemo(() => articles.filter((article) => {
     const statusMatches = status === 'all'
-      || (status === 'active' ? !['rejected', 'published'].includes(article.status) : status === 'queued' ? ['new', 'processing'].includes(article.status) : article.status === status);
+      || (status === 'active' ? !['rejected', 'published', 'social_sent'].includes(article.status) : status === 'queued' ? ['new', 'processing', 'social_processing'].includes(article.status) : article.status === status);
     const feedMatches = !feedId || article.feedId === feedId;
     const normalized = query.trim().toLocaleLowerCase('fa');
     const queryMatches = !normalized || `${article.titleFa} ${article.originalTitle} ${article.sourceName}`.toLocaleLowerCase('fa').includes(normalized);
@@ -85,10 +88,11 @@ export default function NewsPage() {
   }
 
   const cards: Array<{ key: Filter; label: string; count: number; tone: string }> = [
-    { key: 'active', label: 'جریان فعال', count: articles.filter((item) => !['rejected', 'published'].includes(item.status)).length, tone: 'text-slate-900' },
+    { key: 'active', label: 'جریان فعال', count: articles.filter((item) => !['rejected', 'published', 'social_sent'].includes(item.status)).length, tone: 'text-slate-900' },
     { key: 'ready', label: 'آماده بررسی', count: articles.filter((item) => item.status === 'ready').length, tone: 'text-emerald-700' },
     { key: 'queued', label: 'در حال پردازش', count: articles.filter((item) => ['new', 'processing'].includes(item.status)).length, tone: 'text-blue-700' },
     { key: 'rejected', label: 'ردشده‌ها', count: articles.filter((item) => item.status === 'rejected').length, tone: 'text-red-700' },
+    { key: 'social_sent', label: 'ارسال به استودیو', count: articles.filter((item) => item.status === 'social_sent').length, tone: 'text-violet-700' },
     { key: 'published', label: 'منتشرشده‌ها', count: articles.filter((item) => item.status === 'published').length, tone: 'text-violet-700' },
   ];
 
@@ -103,7 +107,7 @@ export default function NewsPage() {
         {notice && <div role="status" className={cn('rounded-2xl border px-4 py-3 text-sm', notice.type === 'success' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700')}>{notice.text}</div>}
         {articlesApi.error && <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">دریافت خبرها انجام نشد: {articlesApi.error}</div>}
 
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
           {cards.map((card) => <button type="button" key={card.key} onClick={() => setStatus(card.key)} className={cn('rounded-2xl border bg-white p-4 text-right shadow-sm transition hover:-translate-y-0.5 hover:shadow-md', status === card.key ? 'border-primary-400 ring-2 ring-primary-100' : 'border-slate-200')}><div className={cn('text-2xl font-bold', card.tone)}>{formatPersianDigits(card.count)}</div><div className="mt-1 text-sm text-slate-500">{card.label}</div></button>)}
         </section>
 
@@ -115,14 +119,15 @@ export default function NewsPage() {
           </div>
         </Card>
 
-        <div className="flex items-center justify-between"><h2 className="font-bold text-slate-900">{status === 'rejected' ? 'خبرهای ردشده' : status === 'published' ? 'خبرهای منتشرشده' : 'خبرها'}</h2><span className="text-sm text-slate-500">{rows.length} خبر</span></div>
+        <div className="flex items-center justify-between"><h2 className="font-bold text-slate-900">{status === 'rejected' ? 'خبرهای ردشده' : status === 'published' ? 'خبرهای منتشرشده' : status === 'social_sent' ? 'خبرهای ارسال‌شده به استودیوی اجتماعی' : 'خبرها'}</h2><span className="text-sm text-slate-500">{rows.length} خبر</span></div>
         {articlesApi.isLoading && !articlesApi.data ? <div className="grid min-h-64 place-items-center"><span className="h-10 w-10 animate-spin rounded-full border-4 border-primary-600 border-t-transparent" /></div> : rows.length === 0 ? <Card className="flex min-h-64 flex-col items-center justify-center p-8 text-center"><span className="grid h-16 w-16 place-items-center rounded-2xl bg-slate-100 text-slate-400"><Newspaper className="h-8 w-8" /></span><h3 className="mt-4 font-bold text-slate-900">خبری در این بخش نیست</h3><p className="mt-2 text-sm text-slate-500">فیدهای اتاق خبر را اضافه کنید یا «دریافت خبرهای جدید» را بزنید.</p></Card> : (
           <section className="grid gap-4 xl:grid-cols-2">
             {rows.map((article) => {
               const meta = STATUS[article.status] ?? { label: article.status, badge: 'default' as const };
-              const canReject = !['rejected', 'publishing', 'published'].includes(article.status);
+              const canReject = !['rejected', 'publishing', 'published', 'social_processing', 'social_sent'].includes(article.status);
               const canSummarize = ['new', 'ready', 'failed'].includes(article.status);
               const canPublish = ['ready', 'publish_failed'].includes(article.status);
+              const canSendToSocial = ['ready', 'publish_failed', 'social_failed'].includes(article.status);
               return <article key={article.id} className="flex min-w-0 flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
                 {article.featuredImageUrl && <div className="mb-4 overflow-hidden rounded-2xl border border-slate-100 bg-slate-100"><img src={article.featuredImageUrl} alt="تصویر شاخص خبر" className="h-48 w-full object-cover" loading="lazy" /></div>}
                 <div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0 flex-1"><h3 className="break-words text-lg font-bold leading-8 text-slate-900">{article.titleFa || article.originalTitle}</h3><p className="mt-2 text-xs text-slate-500">منبع: {article.sourceName || 'نامشخص'} · {article.publishedAtSource ? new Date(article.publishedAtSource).toLocaleString('fa-IR') : 'بدون تاریخ منبع'}</p></div><Badge variant={meta.badge}>{meta.label}</Badge></div>
@@ -132,8 +137,10 @@ export default function NewsPage() {
                 <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
                   <a className="inline-flex items-center gap-1.5 rounded-xl border px-3 py-2 text-sm text-blue-700 hover:bg-blue-50" href={article.originalUrl} target="_blank" rel="noreferrer"><ExternalLink className="h-4 w-4" /> منبع اصلی</a>
                   {canSummarize && <Button size="sm" variant="outline" isLoading={busy === `summarize-${article.id}`} onClick={() => run(`summarize-${article.id}`, () => apiFetch(`/publishing/news/articles/${article.id}/summarize`, { method: 'POST' }), 'تیتر و خلاصهٔ فارسی آماده شد.')}><RefreshCw className="h-4 w-4" />{article.status === 'ready' ? 'آماده‌سازی دوباره' : 'ترجمه و خلاصه‌سازی'}</Button>}
+                  {canSendToSocial && <Button size="sm" variant="outline" className="border-violet-300 text-violet-700 hover:bg-violet-50" isLoading={busy === `social-${article.id}`} onClick={() => run(`social-${article.id}`, () => apiFetch(`/publishing/news/articles/${article.id}/send-to-social`, { method: 'POST' }), 'خبر با تیتر و خلاصه کوتاه در استودیوی اجتماعی آماده شد.')}><Share2 className="h-4 w-4" /> ارسال به استودیوی اجتماعی</Button>}
                   {canPublish && <Button size="sm" isLoading={busy === `publish-${article.id}`} onClick={() => { if (window.confirm('متن کامل خبر از منبع خوانده، ترجمه و در WordPress ارسال شود؟')) void run(`publish-${article.id}`, () => apiFetch(`/publishing/news/articles/${article.id}/publish`, { method: 'POST' }), 'خبر با موفقیت به WordPress ارسال شد.'); }}><Send className="h-4 w-4" />{article.status === 'publish_failed' ? 'تلاش دوباره برای انتشار' : 'انتشار در سایت'}</Button>}
                   {canReject && <Button size="sm" variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700" isLoading={busy === `reject-${article.id}`} onClick={() => { if (window.confirm('این خبر رد شود؟ خبر پس از ۳ روز برای همیشه حذف خواهد شد.')) void run(`reject-${article.id}`, () => apiFetch(`/publishing/news/articles/${article.id}/reject`, { method: 'POST' }), 'خبر به بخش ردشده‌ها منتقل شد.'); }}><Trash2 className="h-4 w-4" /> رد خبر</Button>}
+                  {article.status === 'social_sent' && <Link className="inline-flex items-center gap-1.5 rounded-xl bg-violet-50 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-100" href="/publishing/social"><CheckCircle2 className="h-4 w-4" /> مشاهده در استودیوی اجتماعی</Link>}
                   {article.wordpressPostUrl && <a className="inline-flex items-center gap-1.5 rounded-xl bg-emerald-50 px-3 py-2 text-sm text-emerald-700" href={article.wordpressPostUrl} target="_blank" rel="noreferrer"><CheckCircle2 className="h-4 w-4" /> مشاهده در سایت</a>}
                 </div>
               </article>;
