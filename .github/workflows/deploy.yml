@@ -197,6 +197,23 @@ jobs:
             exit "$code"
           }
           trap on_deploy_error ERR
+          pull_images_with_retry() {
+            max_attempts=5
+            delay_seconds=5
+            for attempt in $(seq 1 "$max_attempts"); do
+              echo "Pulling deployment images from GHCR (attempt ${attempt}/${max_attempts})..."
+              if docker compose --env-file .env pull api web; then
+                return 0
+              fi
+              if [ "$attempt" -eq "$max_attempts" ]; then
+                echo "Deployment stopped: downloading images from GHCR failed after ${max_attempts} attempts. Check the server's DNS, firewall, proxy, and outbound TLS access to ghcr.io, then retry."
+                return 1
+              fi
+              echo "Image download failed; retrying in ${delay_seconds} seconds..."
+              sleep "$delay_seconds"
+              delay_seconds=$((delay_seconds * 2))
+            done
+          }
           if ! grep -Eq '^APP_VERSION=' .env; then printf '\nAPP_VERSION=%s\n' "$VERSION" >> .env; fi
           if ! grep -Eq '^IMAGE_PREFIX=' .env; then printf '\nIMAGE_PREFIX=%s\n' "$IMAGE_PREFIX" >> .env; fi
           if [ -n "${GHCR_TOKEN:-}" ]; then
@@ -204,7 +221,7 @@ jobs:
           fi
           if grep -q '^APP_VERSION=' .env; then sed -i "s/^APP_VERSION=.*/APP_VERSION=$VERSION/" .env; else printf '\nAPP_VERSION=%s\n' "$VERSION" >> .env; fi
           if grep -q '^IMAGE_PREFIX=' .env; then sed -i "s|^IMAGE_PREFIX=.*|IMAGE_PREFIX=$IMAGE_PREFIX|" .env; else printf '\nIMAGE_PREFIX=%s\n' "$IMAGE_PREFIX" >> .env; fi
-          docker compose --env-file .env pull api web
+          pull_images_with_retry
           docker compose --env-file .env up -d --no-build --remove-orphans
           docker compose --env-file .env run --rm api node prisma/seed.cjs
           for attempt in $(seq 1 45); do
