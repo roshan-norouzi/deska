@@ -13,6 +13,7 @@ type Settings = Record<string, string>;
 type ActiveTab = 'ai' | 'social' | 'news' | 'wordpress';
 const SETTINGS_DRAFT_KEY = 'deska_publishing_settings_draft';
 const SETTINGS_DRAFT_VERSION = 1;
+const MAX_COVER_TEMPLATES = 20;
 const SECRET_SETTING_KEYS = new Set(['gapgpt_api_key', 'wp_app_password', 'telegram_bot_token', 'social_instagram_access_token', 'social_linkedin_access_token', 'social_facebook_page_access_token']);
 
 function readSettingsDraft(): Settings {
@@ -183,13 +184,25 @@ export default function PublishingSettingsPage() {
   }
 
   function addCoverTemplate(copyCurrent = false) {
+    if (coverTemplateLibrary.templates.length >= MAX_COVER_TEMPLATES) {
+      setError(`حداکثر ${MAX_COVER_TEMPLATES} قالب تصویری می‌توانید داشته باشید.`);
+      return;
+    }
+    if (copyCurrent && !selectedCoverTemplate) return;
     const id = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `template-${Date.now()}`;
     const template = copyCurrent && selectedCoverTemplate
       ? JSON.parse(JSON.stringify(selectedCoverTemplate.template))
       : JSON.parse(JSON.stringify(parseTemplate('')));
-    const next = { id, name: copyCurrent ? `${selectedCoverTemplate?.name || 'قالب'} - کپی` : `قالب جدید ${coverTemplateLibrary.templates.length + 1}`, template };
+    const baseName = copyCurrent ? `${selectedCoverTemplate?.name || 'قالب'} - کپی` : `قالب جدید ${coverTemplateLibrary.templates.length + 1}`;
+    const existingNames = new Set(coverTemplateLibrary.templates.map((item) => item.name.trim().toLocaleLowerCase('fa')));
+    let name = baseName;
+    let suffix = 2;
+    while (existingNames.has(name.toLocaleLowerCase('fa'))) name = `${baseName} (${suffix++})`;
+    const next = { id, name, template };
     setCoverTemplateLibrary({ ...coverTemplateLibrary, templates: [...coverTemplateLibrary.templates, next] });
     setSelectedCoverTemplateId(id);
+    setError('');
+    if (copyCurrent) setMessage(`قالب «${selectedCoverTemplate?.name}» تکثیر شد؛ نسخه جدید را ویرایش و سپس ذخیره کنید.`);
   }
 
   function updateSelectedCoverTemplate(patch: Partial<(typeof coverTemplateLibrary.templates)[number]>) {
@@ -335,7 +348,7 @@ export default function PublishingSettingsPage() {
             <div className="grid gap-3 rounded-2xl border border-violet-100 bg-violet-50/50 p-4 lg:grid-cols-[minmax(180px,1fr)_minmax(220px,1fr)_auto]">
               <label className="grid gap-1 text-xs font-medium text-slate-600">قالب در حال ویرایش<select className="rounded-xl border bg-white px-3 py-2.5 text-sm" value={selectedCoverTemplate?.id || ''} onChange={(event) => setSelectedCoverTemplateId(event.target.value)}>{coverTemplateLibrary.templates.map((item) => <option key={item.id} value={item.id}>{item.name}{item.id === coverTemplateLibrary.defaultTemplateId ? ' (پیش‌فرض)' : ''}</option>)}</select></label>
               <label className="grid gap-1 text-xs font-medium text-slate-600">نام قالب<input className="rounded-xl border bg-white px-3 py-2.5 text-sm" maxLength={80} value={selectedCoverTemplate?.name || ''} onChange={(event) => updateSelectedCoverTemplate({ name: event.target.value })} /></label>
-              <div className="flex flex-wrap items-end gap-2"><Button type="button" size="sm" onClick={() => addCoverTemplate(false)}><Plus className="h-4 w-4" /> قالب جدید</Button><Button type="button" size="sm" variant="outline" onClick={() => addCoverTemplate(true)}><Copy className="h-4 w-4" /> کپی قالب</Button><Button type="button" size="sm" variant="outline" disabled={!selectedCoverTemplate || selectedCoverTemplate.id === coverTemplateLibrary.defaultTemplateId} onClick={() => selectedCoverTemplate && setCoverTemplateLibrary({ ...coverTemplateLibrary, defaultTemplateId: selectedCoverTemplate.id })}><Star className="h-4 w-4" /> پیش‌فرض</Button><Button type="button" size="sm" variant="outline" className="text-red-600" disabled={coverTemplateLibrary.templates.length <= 1} onClick={removeSelectedCoverTemplate}><Trash2 className="h-4 w-4" /> حذف</Button></div>
+              <div className="flex flex-wrap items-end gap-2"><Button type="button" size="sm" disabled={coverTemplateLibrary.templates.length >= MAX_COVER_TEMPLATES} onClick={() => addCoverTemplate(false)}><Plus className="h-4 w-4" /> قالب جدید</Button><Button type="button" size="sm" variant="outline" disabled={!selectedCoverTemplate || coverTemplateLibrary.templates.length >= MAX_COVER_TEMPLATES} onClick={() => addCoverTemplate(true)}><Copy className="h-4 w-4" /> تکثیر قالب انتخاب‌شده</Button><Button type="button" size="sm" variant="outline" disabled={!selectedCoverTemplate || selectedCoverTemplate.id === coverTemplateLibrary.defaultTemplateId} onClick={() => selectedCoverTemplate && setCoverTemplateLibrary({ ...coverTemplateLibrary, defaultTemplateId: selectedCoverTemplate.id })}><Star className="h-4 w-4" /> پیش‌فرض</Button><Button type="button" size="sm" variant="outline" className="text-red-600" disabled={coverTemplateLibrary.templates.length <= 1} onClick={removeSelectedCoverTemplate}><Trash2 className="h-4 w-4" /> حذف</Button></div>
             </div>
             {selectedCoverTemplate && <CoverTemplateBuilder key={selectedCoverTemplate.id} value={JSON.stringify(selectedCoverTemplate.template)} onChange={(templateValue) => updateSelectedCoverTemplate({ template: parseTemplate(templateValue) })} fontLibrary={parseFontLibrary(values.social_font_library)} demoArticle={socialArticles?.find((article) => article.authorImageUrl || article.featuredImageUrl) || socialArticles?.[0]} />}
           </div>}

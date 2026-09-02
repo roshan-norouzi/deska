@@ -87,11 +87,12 @@ export class SocialNetworkPublisherService {
     const article = await this.prisma.socialArticle.findFirst({
       where: { id: articleId, tenantId },
       select: {
-        id: true, title: true, link: true, captionText: true, author: true, category: true,
+        id: true, title: true, link: true, captionText: true, author: true, category: true, status: true,
         readingTime: true, leadText: true, summaryText: true, shortUrl: true, feed: { select: { name: true } },
       },
     });
     if (!article) throw new NotFoundException('مطلب اجتماعی یافت نشد');
+    const preserveArchive = article.status === 'archived';
     const image = readImageDataUrl(imageDataUrl);
     const submittedCaption = caption.trim();
     const settings = await this.settings.getRaw(tenantId);
@@ -111,7 +112,7 @@ export class SocialNetworkPublisherService {
       })
       : submittedCaption;
     if (!normalizedCaption) throw new BadRequestException('کپشن نمی‌تواند خالی باشد');
-    await this.prisma.socialArticle.update({ where: { id: article.id }, data: { captionText: normalizedCaption, rewrittenText: normalizedCaption, status: 'ready' } });
+    await this.prisma.socialArticle.update({ where: { id: article.id }, data: { captionText: normalizedCaption, rewrittenText: normalizedCaption, status: preserveArchive ? 'archived' : 'ready' } });
     if (network === 'telegram') await this.publishTelegram(settings, normalizedCaption, image);
     if (network === 'facebook') await this.publishFacebook(settings, normalizedCaption, image);
     if (network === 'linkedin') await this.publishLinkedIn(settings, article.title, normalizedCaption, image);

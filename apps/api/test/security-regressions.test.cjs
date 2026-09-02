@@ -318,6 +318,33 @@ test('a prepared newsroom article is converted directly into ready social conten
   assert.deepEqual(newsStatuses, ['social_processing', 'social_sent']);
 });
 
+test('archived social articles are hidden from the default list', async () => {
+  let listQuery;
+  let archiveUpdate;
+  const prisma = {
+    socialArticle: {
+      findMany: async (query) => {
+        listQuery = query;
+        return [];
+      },
+      findFirst: async () => ({ id: 'social-a', tenantId: 'tenant-a', status: 'ready' }),
+      update: async (query) => {
+        archiveUpdate = query;
+        return { id: 'social-a', status: query.data.status };
+      },
+    },
+  };
+  const service = new SocialStudioService(prisma, {}, {}, {});
+
+  await service.articles('tenant-a');
+  const archived = await service.archive('tenant-a', 'social-a');
+
+  assert.deepEqual(listQuery.where, { tenantId: 'tenant-a', status: { not: 'archived' } });
+  assert.deepEqual(archiveUpdate.where, { id: 'social-a' });
+  assert.equal(archiveUpdate.data.status, 'archived');
+  assert.equal(archived.status, 'archived');
+});
+
 test('saving a new integration host removes an omitted stored secret', async () => {
   let writtenSettings;
   const prisma = {

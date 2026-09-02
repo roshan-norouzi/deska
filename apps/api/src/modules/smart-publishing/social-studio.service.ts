@@ -49,11 +49,11 @@ export class SocialStudioService {
   }
 
   articles(tenantId: string, status?: string) {
-    if (status && !['pending', 'processing', 'ready', 'failed'].includes(status)) {
+    if (status && !['pending', 'processing', 'ready', 'failed', 'archived'].includes(status)) {
       throw new BadRequestException('وضعیت محتوای اجتماعی معتبر نیست');
     }
     return this.prisma.socialArticle.findMany({
-      where: { tenantId, ...(status ? { status } : {}) },
+      where: { tenantId, ...(status ? { status } : { status: { not: 'archived' } }) },
       include: { feed: { select: { id: true, name: true, enabled: true } } },
       orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
       take: 200,
@@ -63,6 +63,17 @@ export class SocialStudioService {
   async deleteAllArticles(tenantId: string) {
     const result = await this.prisma.socialArticle.deleteMany({ where: { tenantId } });
     return { ok: true, deleted: result.count };
+  }
+
+  async archive(tenantId: string, id: string) {
+    const article = await this.prisma.socialArticle.findFirst({ where: { id, tenantId } });
+    if (!article) throw new NotFoundException('مطلب اجتماعی یافت نشد');
+    if (article.status === 'processing') throw new BadRequestException('مطلب در حال آماده‌سازی را نمی‌توان آرشیو کرد');
+    if (article.status === 'archived') return article;
+    return this.prisma.socialArticle.update({
+      where: { id: article.id },
+      data: { status: 'archived', processingStartedAt: null, lastError: '' },
+    });
   }
 
   async fetchFeed(tenantId: string, feedId: string) {
@@ -245,8 +256,9 @@ export class SocialStudioService {
   async prepare(tenantId: string, id: string) {
     const article = await this.prisma.socialArticle.findFirst({ where: { id, tenantId } });
     if (!article) throw new NotFoundException('مطلب اجتماعی یافت نشد');
+    const preserveArchive = article.status === 'archived';
     const claimed = await this.prisma.socialArticle.updateMany({
-      where: { id, tenantId, status: { in: ['pending', 'ready', 'failed'] } },
+      where: { id, tenantId, status: { in: ['pending', 'ready', 'failed', 'archived'] } },
       data: { status: 'processing', processingStartedAt: new Date(), lastError: '' },
     });
     if (!claimed.count) throw new BadRequestException('این مطلب هم‌اکنون در حال پردازش است');
@@ -287,7 +299,7 @@ export class SocialStudioService {
           shortUrl,
           captionText: renderTemplate(captionTemplate, values),
           readingTime,
-          status: 'ready',
+          status: preserveArchive ? 'archived' : 'ready',
           processingStartedAt: null,
           lastError: '',
         },
@@ -297,7 +309,7 @@ export class SocialStudioService {
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'خطای آماده‌سازی مطلب اجتماعی';
-      await this.prisma.socialArticle.updateMany({ where: { id, tenantId, status: 'processing' }, data: { status: 'failed', processingStartedAt: null, lastError: message.slice(0, 1000) } });
+      await this.prisma.socialArticle.updateMany({ where: { id, tenantId, status: 'processing' }, data: { status: preserveArchive ? 'archived' : 'failed', processingStartedAt: null, lastError: message.slice(0, 1000) } });
       throw new BadRequestException(`آماده‌سازی مطلب اجتماعی انجام نشد: ${message}`);
     }
   }
@@ -305,7 +317,7 @@ export class SocialStudioService {
   async updateCaption(tenantId: string, id: string, captionText: string) {
     const article = await this.prisma.socialArticle.findFirst({ where: { id, tenantId } });
     if (!article) throw new NotFoundException('مطلب اجتماعی یافت نشد');
-    return this.prisma.socialArticle.update({ where: { id }, data: { captionText: captionText.trim(), rewrittenText: captionText.trim(), status: 'ready' } });
+    return this.prisma.socialArticle.update({ where: { id }, data: { captionText: captionText.trim(), rewrittenText: captionText.trim(), status: article.status === 'archived' ? 'archived' : 'ready' } });
   }
 
   async updateLead(tenantId: string, id: string, leadText: string) {
@@ -329,7 +341,7 @@ export class SocialStudioService {
       source: feed?.name || '',
     };
     const caption = renderTemplate(captionTemplate, values);
-    return this.prisma.socialArticle.update({ where: { id }, data: { leadText: normalized, captionText: caption, rewrittenText: caption, status: 'ready' } });
+    return this.prisma.socialArticle.update({ where: { id }, data: { leadText: normalized, captionText: caption, rewrittenText: caption, status: article.status === 'archived' ? 'archived' : 'ready' } });
   }
 
   async updateTitle(tenantId: string, id: string, title: string) {
@@ -353,7 +365,7 @@ export class SocialStudioService {
       source: feed?.name || '',
     };
     const caption = renderTemplate(captionTemplate, values);
-    return this.prisma.socialArticle.update({ where: { id }, data: { title: normalized, captionText: caption, rewrittenText: caption, status: 'ready' } });
+    return this.prisma.socialArticle.update({ where: { id }, data: { title: normalized, captionText: caption, rewrittenText: caption, status: article.status === 'archived' ? 'archived' : 'ready' } });
   }
 
   @Interval('smart-publishing-social-maintenance', 60_000)
